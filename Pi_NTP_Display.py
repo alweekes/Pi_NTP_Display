@@ -87,16 +87,33 @@ def main():
   time.sleep(2) # 20 second delay
 
   #Time to display each stats page (seconds)
-  stats_delay=2
+  stats_delay = 2
   #Time to display time page (seconds)
-  time_cycles=10
+  time_cycles = 10
+  #Number of GPS data chronyPages
+  gpsPages = 2
+  #Number of chronyStats chronyPages
+  chronyPages = 5
 
   while True:
 
-    displayTime(time_cycles)
-    displayGPSData(1, stats_delay)
-    displayTime(time_cycles)
-    displayChronyStats(1, stats_delay)
+    # Alternately display time and GPS data
+    i = 1
+    while i <= gpsPages:
+      displayTime(time_cycles)
+      displayGPSData(i, stats_delay)
+      if i == gpsPages:
+        break
+      i += 1
+
+    #Alternately display time and chrony stats
+    i = 1
+    while i <= chronyPages:
+      displayTime(time_cycles)
+      displayChronyStats(i, stats_delay)
+      if i == chronyPages:
+        break
+      i += 1
 
 def displayTime(cycles):
   # Blank display
