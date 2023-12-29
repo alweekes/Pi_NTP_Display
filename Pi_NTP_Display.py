@@ -2,10 +2,14 @@
 #--------------------------------------
 #
 #   Pi NTP Server Stats + Clock Display
-#   LCD Driver with text justification
 #
-#   Displaytech 204A 20x4 LCD
+#   Andrew L. Weekes 29/12/2023
+#
+#   Using Displaytech 204A 20x4 LCD
 #   https://uk.rs-online.com/web/p/lcd-monochrome-displays/5326818
+#   LCD Driver with text justification based on
+#   Matt Hawkins code:
+#   https://www.raspberrypi-spy.co.uk/2012/08/20x4-lcd-module-control-using-python/
 #
 #--------------------------------------
 
