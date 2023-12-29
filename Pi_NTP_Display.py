@@ -1,13 +1,16 @@
 #!/usr/bin/python
-#--------------------------------------
+#--------------------------------------------------------------------------------
 #
-#   Pi NTP Server Stats + Clock Display
-#   LCD Driver with text justification
+# Pi NTP Server Stats + Clock Display
+# LCD Driver with text justification
 #
-#   Displaytech 204A 20x4 LCD
-#   https://uk.rs-online.com/web/p/lcd-monochrome-displays/5326818
+# Displaytech 204A 20x4 LCD
+# https://uk.rs-online.com/web/p/lcd-monochrome-displays/5326818
 #
-#--------------------------------------
+# LCD code is a simplified version of Matt Hawkins work:
+# https://www.raspberrypi-spy.co.uk/2012/08/20x4-lcd-module-control-using-python/
+#
+#---------------------------------------------------------------------------------
 
 # The wiring for the LCD is as follows:
 # 1 : GND [RPi Pin 6]
