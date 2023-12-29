@@ -2,14 +2,10 @@
 #--------------------------------------
 #
 #   Pi NTP Server Stats + Clock Display
+#   LCD Driver with text justification
 #
-#   Andrew L. Weekes 29/12/2023
-#
-#   Using Displaytech 204A 20x4 LCD
+#   Displaytech 204A 20x4 LCD
 #   https://uk.rs-online.com/web/p/lcd-monochrome-displays/5326818
-#   LCD Driver with text justification based on
-#   Matt Hawkins code:
-#   https://www.raspberrypi-spy.co.uk/2012/08/20x4-lcd-module-control-using-python/
 #
 #--------------------------------------
 
@@ -81,16 +77,11 @@ def main():
   lcd_init()
 
   # Send some centred test
-  lcd_string("--------------------",LCD_LINE_1,2)
-  lcd_string("Rasbperry Pi 1",LCD_LINE_2,2)
-  lcd_string("Model B",LCD_LINE_3,2)
-  lcd_string("--------------------",LCD_LINE_4,2)
-  time.sleep(0.5) # 3 second delay
   lcd_string("GPS Disciplined",LCD_LINE_1,2)
   lcd_string("NTP Time Server",LCD_LINE_2,2)
   lcd_string("v1.0 28/12/23",LCD_LINE_3,2)
   lcd_string("Andrew L. Weekes",LCD_LINE_4,2)
-  time.sleep(0.5) # 20 second delay
+  time.sleep(2) # 20 second delay
 
   #Time to display each stats page (seconds)
   stats_delay=2
@@ -99,9 +90,10 @@ def main():
 
   while True:
 
-#    displayTime(time_cycles)
-#    displayChronyStats(stats_delay)
-    displayGPSData()
+    displayTime(time_cycles)
+    displayChronyStats(stats_delay)
+    displayTime(time_cycles)
+    displayGPSData(stats_delay)
 
 def displayTime(cycles):
   # Blank display
@@ -122,29 +114,27 @@ def displayTime(cycles):
     now = datetime.now()
 
     #Update only if changed
-    if timestr != now.strftime("%H:%M:%S"):
-      timestr = now.strftime("%H:%M:%S")
-      os.system('clear')
-      print(timestr)
-      lcd_string(timestr,LCD_LINE_3,2)
-
     if datestr != now.strftime("%b %d, %Y"):
       datestr = now.strftime("%b %d, %Y")
       os.system('clear')
       print(datestr)
-      lcd_string(datestr,LCD_LINE_4,2)
+      lcd_string(datestr,LCD_LINE_3,2)
+
+    if timestr != now.strftime("%H:%M:%S"):
+      timestr = now.strftime("%H:%M:%S")
+      os.system('clear')
+      print(timestr)
+      lcd_string(timestr,LCD_LINE_4,2)
 
     x += 1
     time.sleep(1)
 
-def displayGPSData():
-  # Blank display
-  lcd_byte(0x01, LCD_CMD)
+def displayGPSData(page, delay):
 
   # Get output of gpspipe, output is native GPSD JSON sentences + NMEA messages
-  # -r = raw NMEA senteces, -x 2 causes gpspipe to close after 2 second
+  # -r = raw NMEA senteces, -x causes gpspipe to close after no. seconds
   try:
-    output = subprocess.check_output("gpspipe -r -x 2", shell=True, text=True)
+    output = subprocess.check_output("gpspipe -r -x 3", shell=True, text=True)
     returncode = 0
   except subprocess.CalledProcessError as e:
     output = e.output
@@ -155,19 +145,63 @@ def displayGPSData():
   #Split output into list elements
   gpsPipe = output.split()
 
-  # Pattern to match, keep NMEA messages and discard JSON list items
-  pattern = "$GP"
-  filtered_gpsPipe = [x for x in gpsPipe if x.startswith(pattern)]
-  print (filtered_gpsPipe)
+  # Get $GPGGA messages for location data
+  pattern = "$GPGGA"
+  gpgga = [x for x in gpsPipe if x.startswith(pattern)]
+  # pynmea2 can't process list, so pick first available item in list
+  msg = pynmea2.parse(gpgga[0])
 
-#  gpsdata = pynmea2.parse(filtered_gpsPipe)
-# print (gpsdata)
+  #Get data from $GPGGA message (number of satellites, lat, long, height)
+  satellites = ("Satellites: " + msg.num_sats)
+  latitude = ("Lat: " + msg.lat + msg.lat_dir)
+  longitude = ("Lon: " + msg.lon + msg.lon_dir)
+  altitude = ("Alt: " + str(msg.altitude) + msg.altitude_units)
+
+ # Get $GPGSA messages for fix and dilution of precision data
+  pattern = "$GPGSA"
+  gpgsa = [x for x in gpsPipe if x.startswith(pattern)]
+  # pynmea2 can't process list, so pick first available item in list
+  dop = pynmea2.parse(gpgsa[0])
+
+  #Get data from $GPGSA message for fix status and DOP
+  readable_fix = ("No fix", "2D Fix", "3D Fix")
+  fix = ("Fix: " + readable_fix[int(dop.mode_fix_type) -1])
+  pdop = ("PDOP: " + dop.pdop)
+  hdop = ("HDOP: " + dop.hdop)
+  vdop = ("VDOP: " + dop.vdop)
+
+  # Blank display
+  lcd_byte(0x01, LCD_CMD)
+
+  if page = 1:
+    #Page 1
+    print(satellites)
+    print(latitude)
+    print(longitude)
+    print(altitude)
+    lcd_string(satellites,LCD_LINE_3,1)
+    lcd_string(latitude,LCD_LINE_1,1)
+    lcd_string(longitude,LCD_LINE_2,1)
+    lcd_string(altitude,LCD_LINE_4,1)
+
+  elif page = 2:
+    #Page 2
+    print(fix)
+    print(pdop)
+    print(hdop)
+    print(vdop)
+    lcd_string(fix,LCD_LINE_3,1)
+    lcd_string(pdop,LCD_LINE_1,1)
+    lcd_string(hdop,LCD_LINE_2,1)
+    lcd_string(vdop,LCD_LINE_4,1)
+
+  time.sleep(delay)
 
 # Debugging to display list elements for above choices
-  for count, item in enumerate(filtered_gpsPipe):
-    print (count, item)
+#  for count, item in enumerate(gpsPipe):
+#    print (count, item)
 
-def displayChronyStats():
+def displayChronyStats(page, delay):
   # Blank display
   lcd_byte(0x01, LCD_CMD)
 
@@ -185,64 +219,66 @@ def displayChronyStats():
 
   #Output stats to console and LCD
 
-  #Page 1
-  os.system('clear')
-  print("System Time: ")
-  print(chronyResult[20] + " " + "s " + chronyResult[22])
-  print("Last offset: ")
-  print(chronyResult[29] + " s")
-  lcd_string("System Time: ",LCD_LINE_1,1)
-  lcd_string(chronyResult[20] + " " + "s " + chronyResult[22],LCD_LINE_2,1)
-  lcd_string("Last offset: ",LCD_LINE_3,1)
-  lcd_string(chronyResult[29] + " s",LCD_LINE_4,1)
-  time.sleep(delay)
+  if page = 1:
+    #Page 1
+    os.system('clear')
+    print("System Time: ")
+    print(chronyResult[20] + " " + "s " + chronyResult[22])
+    print("Last offset: ")
+    print(chronyResult[29] + " s")
+    lcd_string("System Time: ",LCD_LINE_1,1)
+    lcd_string(chronyResult[20] + " " + "s " + chronyResult[22],LCD_LINE_2,3)
+    lcd_string("Last offset: ",LCD_LINE_3,1)
+    lcd_string(chronyResult[29] + " s",LCD_LINE_4,3)
 
-  #Page 2
-  os.system('clear')
-  print("RMS offset: ")
-  print(chronyResult[34] + " s")
-  print("Frequency: ")
-  print(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
-  lcd_string("RMS offset: ",LCD_LINE_1,1)
-  lcd_string(chronyResult[34] + " s",LCD_LINE_2,1)
-  lcd_string("Frequency: ",LCD_LINE_3,1)
-  lcd_string(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40],LCD_LINE_4,1)
-  time.sleep(delay)
+  elif page = 2:
+    #Page 2
+    os.system('clear')
+    print("RMS offset: ")
+    print(chronyResult[34] + " s")
+    print("Frequency: ")
+    print(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
+    lcd_string("RMS offset: ",LCD_LINE_1,1)
+    lcd_string(chronyResult[34] + " s",LCD_LINE_2,3)
+    lcd_string("Frequency: ",LCD_LINE_3,1)
+    lcd_string(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40],LCD_LINE_4,3)
 
-  #Page 3
-  os.system('clear')
-  print("Residual frequency: ")
-  print(chronyResult[44] + " " + chronyResult[45])
-  print("Skew: ")
-  print(chronyResult[48] + " " + chronyResult[49])
-  lcd_string("Residual frequency: ",LCD_LINE_1,1)
-  lcd_string(chronyResult[44] + " " + chronyResult[45],LCD_LINE_2,1)
-  lcd_string("Skew: ",LCD_LINE_3,1)
-  lcd_string(chronyResult[48] + " " + chronyResult[49],LCD_LINE_4,1)
-  time.sleep(delay)
+  elif page = 3:
+    #Page 3
+    os.system('clear')
+    print("Residual frequency: ")
+    print(chronyResult[44] + " " + chronyResult[45])
+    print("Skew: ")
+    print(chronyResult[48] + " " + chronyResult[49])
+    lcd_string("Residual frequency: ",LCD_LINE_1,1)
+    lcd_string(chronyResult[44] + " " + chronyResult[45],LCD_LINE_2,3)
+    lcd_string("Skew: ",LCD_LINE_3,1)
+    lcd_string(chronyResult[48] + " " + chronyResult[49],LCD_LINE_4,3)
 
-  #Page 4
-  os.system('clear')
-  print("Root delay: ")
-  print(chronyResult[53] + " sec")
-  print("Root dispersion: ")
-  print(chronyResult[58] + " sec")
-  lcd_string("Root delay: ",LCD_LINE_1,1)
-  lcd_string(chronyResult[53] + " sec",LCD_LINE_2,1)
-  lcd_string("Root dispersion: ",LCD_LINE_3,1)
-  lcd_string(chronyResult[58] + " sec",LCD_LINE_4,1)
-  time.sleep(delay)
+  elif page = 4:
+    #Page 4
+    os.system('clear')
+    print("Root delay: ")
+    print(chronyResult[53] + " sec")
+    print("Root dispersion: ")
+    print(chronyResult[58] + " sec")
+    lcd_string("Root delay: ",LCD_LINE_1,1)
+    lcd_string(chronyResult[53] + " sec",LCD_LINE_2,3)
+    lcd_string("Root dispersion: ",LCD_LINE_3,1)
+    lcd_string(chronyResult[58] + " sec",LCD_LINE_4,3)
 
-  #Page 5
-  os.system('clear')
-  print("Update Interval:")
-  print(chronyResult[63] + " sec")
-  print("Leap Status: ")
-  print(chronyResult[68])
-  lcd_string("Update Interval:",LCD_LINE_1,1)
-  lcd_string(chronyResult[63] + " sec",LCD_LINE_2,1)
-  lcd_string("Leap Status: ",LCD_LINE_3,1)
-  lcd_string(chronyResult[68],LCD_LINE_4,1)
+  elif page = 5:
+    #Page 5
+    os.system('clear')
+    print("Update Interval:")
+    print(chronyResult[63] + " sec")
+    print("Leap Status: ")
+    print(chronyResult[68])
+    lcd_string("Update Interval:",LCD_LINE_1,1)
+    lcd_string(chronyResult[63] + " sec",LCD_LINE_2,3)
+    lcd_string("Leap Year Status: ",LCD_LINE_3,1)
+    lcd_string(chronyResult[68],LCD_LINE_4,3)
+
   time.sleep(delay)
 
 # Debugging to display list elements for above choices
@@ -335,5 +371,9 @@ if __name__ == '__main__':
     pass
   finally:
     lcd_byte(0x01, LCD_CMD)
-    lcd_string("Goodbye!",LCD_LINE_1,2)
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("*  System Stopped  *",LCD_LINE_2,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2)
+
     GPIO.cleanup()
