@@ -101,7 +101,7 @@ def main():
 
 #    displayTime(time_cycles)
 #    displayChronyStats(stats_delay)
-    displayGPSdata()
+    displayGPSData()
 
 def displayTime(cycles):
   # Blank display
@@ -160,12 +160,12 @@ def displayGPSData():
   filtered_gpsPipe = [x for x in gpsPipe if x.startswith(pattern)]
   print (filtered_gpsPipe)
 
-  gpsdata = pynmea2.parse(filtered_gpsPipe)
-  print (gpsdata)
+#  gpsdata = pynmea2.parse(filtered_gpsPipe)
+# print (gpsdata)
 
 # Debugging to display list elements for above choices
-#  for count, item in enumerate(gpsResult):
-#    print (count, item)
+  for count, item in enumerate(filtered_gpsPipe):
+    print (count, item)
 
 def displayChronyStats():
   # Blank display
