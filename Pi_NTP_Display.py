@@ -94,9 +94,9 @@ def main():
   while True:
 
     displayTime(time_cycles)
-    displayChronyStats(stats_delay)
+    displayGPSData(1, stats_delay)
     displayTime(time_cycles)
-    displayGPSData(stats_delay)
+    displayChronyStats(1, stats_delay)
 
 def displayTime(cycles):
   # Blank display
@@ -176,7 +176,7 @@ def displayGPSData(page, delay):
   # Blank display
   lcd_byte(0x01, LCD_CMD)
 
-  if page = 1:
+  if page == 1:
     #Page 1
     print(satellites)
     print(latitude)
@@ -187,7 +187,7 @@ def displayGPSData(page, delay):
     lcd_string(longitude,LCD_LINE_2,1)
     lcd_string(altitude,LCD_LINE_4,1)
 
-  elif page = 2:
+  elif page == 2:
     #Page 2
     print(fix)
     print(pdop)
@@ -222,7 +222,7 @@ def displayChronyStats(page, delay):
 
   #Output stats to console and LCD
 
-  if page = 1:
+  if page == 1:
     #Page 1
     os.system('clear')
     print("System Time: ")
@@ -234,7 +234,7 @@ def displayChronyStats(page, delay):
     lcd_string("Last offset: ",LCD_LINE_3,1)
     lcd_string(chronyResult[29] + " s",LCD_LINE_4,3)
 
-  elif page = 2:
+  elif page == 2:
     #Page 2
     os.system('clear')
     print("RMS offset: ")
@@ -246,7 +246,7 @@ def displayChronyStats(page, delay):
     lcd_string("Frequency: ",LCD_LINE_3,1)
     lcd_string(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40],LCD_LINE_4,3)
 
-  elif page = 3:
+  elif page == 3:
     #Page 3
     os.system('clear')
     print("Residual frequency: ")
@@ -258,7 +258,7 @@ def displayChronyStats(page, delay):
     lcd_string("Skew: ",LCD_LINE_3,1)
     lcd_string(chronyResult[48] + " " + chronyResult[49],LCD_LINE_4,3)
 
-  elif page = 4:
+  elif page == 4:
     #Page 4
     os.system('clear')
     print("Root delay: ")
@@ -270,7 +270,7 @@ def displayChronyStats(page, delay):
     lcd_string("Root dispersion: ",LCD_LINE_3,1)
     lcd_string(chronyResult[58] + " sec",LCD_LINE_4,3)
 
-  elif page = 5:
+  elif page == 5:
     #Page 5
     os.system('clear')
     print("Update Interval:")
