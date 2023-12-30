@@ -215,11 +215,13 @@ def displayGPSData(page, delay):
   
   except Exception as e:
     print(e)
+    print(" gpspipe error or no gps data ")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
     lcd_string("*  or no gps data  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
+    time.sleep(delay)
 
 
 def displayChronyStats(page, delay):
@@ -296,11 +298,13 @@ def displayChronyStats(page, delay):
     
   except Exception as e:
     print(e)
+    print("chronyc error or no gps data")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  chronyc Error   *",LCD_LINE_2,2)
     lcd_string("*  or no gps data  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
+    time.sleep(delay)
 
 def blank_display():
   # Blank display
