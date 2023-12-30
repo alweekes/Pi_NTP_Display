@@ -154,93 +154,73 @@ def displayGPSData(page, delay):
   # -r = raw NMEA senteces, -x causes gpspipe to close after no. seconds
   try:
     output = subprocess.check_output("gpspipe -r -x 3", shell=True, text=True)
-    returncode = 0
-  except subprocess.CalledProcessError as e:
-    output = e.output
-    returncode = e.returncode
-    print (returncode)
-    blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  gpspipe error!  *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-    exit(1)
-
-  #Split output into list elements
-  gpsPipe = output.split()
-
-  # Get $GPGGA messages for location data
-  pattern = "$GPGGA"
-  gpgga = [x for x in gpsPipe if x.startswith(pattern)]
-  # pynmea2 can't process list, so pick first available item in list
-  try:
+    
+    #Split output into list elements
+    gpsPipe = output.split()
+    
+    # Get $GPGGA messages for location data
+    pattern = "$GPGGA"
+    gpgga = [x for x in gpsPipe if x.startswith(pattern)]
+    
+    # pynmea2 can't process list, so pick first available item in list
     msg = pynmea2.parse(gpgga[0])
-  except Exception as e:
-    print(e)
-    blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  !No Valid GPS!  *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-    exit(1)
 
-  #Get data from $GPGGA message (number of satellites, lat, long, height)
-  satellites = ("Satellites: " + msg.num_sats)
-  latitude = ("Lat: " + msg.lat + msg.lat_dir)
-  longitude = ("Lon: " + msg.lon + msg.lon_dir)
-  altitude = ("Alt: " + str(msg.altitude) + msg.altitude_units)
+    #Get data from $GPGGA message (number of satellites, lat, long, height)
+    satellites = ("Satellites: " + msg.num_sats)
+    latitude = ("Lat: " + msg.lat + msg.lat_dir)
+    longitude = ("Lon: " + msg.lon + msg.lon_dir)
+    altitude = ("Alt: " + str(msg.altitude) + msg.altitude_units)
 
- # Get $GPGSA messages for fix and dilution of precision data
-  pattern = "$GPGSA"
-  gpgsa = [x for x in gpsPipe if x.startswith(pattern)]
-  # pynmea2 can't process list, so pick first available item in list
-  try:
+    # Get $GPGSA message for fix and dilution of precision data
+    pattern = "$GPGSA"
+    gpgsa = [x for x in gpsPipe if x.startswith(pattern)]
+    
+    # pynmea2 can't process list, so pick first available item in list
     dop = pynmea2.parse(gpgsa[0])
+
+    #Get data from $GPGSA message for fix status and DOP
+    readable_fix = ("No fix", "2D Fix", "3D Fix")
+    fix = ("Fix: " + readable_fix[int(dop.mode_fix_type) -1])
+    pdop = ("PDOP: " + dop.pdop)
+    hdop = ("HDOP: " + dop.hdop)
+    vdop = ("VDOP: " + dop.vdop)
+
+    if page == 1:
+      #Page 1
+      print(satellites)
+      print(latitude)
+      print(longitude)
+      print(altitude)
+      lcd_string(satellites,LCD_LINE_3,1)
+      lcd_string(latitude,LCD_LINE_1,1)
+      lcd_string(longitude,LCD_LINE_2,1)
+      lcd_string(altitude,LCD_LINE_4,1)
+
+    elif page == 2:
+      #Page 2
+      print(fix)
+      print(pdop)
+      print(hdop)
+      print(vdop)
+      lcd_string(fix,LCD_LINE_1,1)
+      lcd_string(pdop,LCD_LINE_2,1)
+      lcd_string(hdop,LCD_LINE_3,1)
+      lcd_string(vdop,LCD_LINE_4,1)
+
+    time.sleep(delay)
+    
+    # Debugging to display list elements for above choices
+    # for count, item in enumerate(gpsPipe):
+    #   print (count, item)
+  
   except Exception as e:
     print(e)
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  !No Valid GPS!  *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
+    lcd_string("*  or no gps data  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
-    exit(1)
 
-  #Get data from $GPGSA message for fix status and DOP
-  readable_fix = ("No fix", "2D Fix", "3D Fix")
-  fix = ("Fix: " + readable_fix[int(dop.mode_fix_type) -1])
-  pdop = ("PDOP: " + dop.pdop)
-  hdop = ("HDOP: " + dop.hdop)
-  vdop = ("VDOP: " + dop.vdop)
-
-  blank_display
-
-  if page == 1:
-    #Page 1
-    print(satellites)
-    print(latitude)
-    print(longitude)
-    print(altitude)
-    lcd_string(satellites,LCD_LINE_3,1)
-    lcd_string(latitude,LCD_LINE_1,1)
-    lcd_string(longitude,LCD_LINE_2,1)
-    lcd_string(altitude,LCD_LINE_4,1)
-
-  elif page == 2:
-    #Page 2
-    print(fix)
-    print(pdop)
-    print(hdop)
-    print(vdop)
-    lcd_string(fix,LCD_LINE_1,1)
-    lcd_string(pdop,LCD_LINE_2,1)
-    lcd_string(hdop,LCD_LINE_3,1)
-    lcd_string(vdop,LCD_LINE_4,1)
-
-  time.sleep(delay)
-
-# Debugging to display list elements for above choices
-#  for count, item in enumerate(gpsPipe):
-#    print (count, item)
 
 def displayChronyStats(page, delay):
   # Blank display
@@ -248,83 +228,79 @@ def displayChronyStats(page, delay):
 
   try:
     output = subprocess.check_output("chronyc tracking", shell=True, text=True)
-    returncode = 0
-  except subprocess.CalledProcessError as e:
-    output = e.output
-    returncode = e.returncode
-    print (returncode)
+    
+    #Split chronyc output into element list
+    chronyResult = output.split()
+    
+    #Output stats to console and LCD
+    if page == 1:
+      #Page 1
+      print("System Time: ")
+      print(chronyResult[20] + " " + "s " + chronyResult[22])
+      print("Last offset: ")
+      print(chronyResult[29] + " s")
+      lcd_string("System Time: ",LCD_LINE_1,1)
+      lcd_string(chronyResult[20] + " " + "s " + chronyResult[22],LCD_LINE_2,3)
+      lcd_string("Last offset: ",LCD_LINE_3,1)
+      lcd_string(chronyResult[29] + " s",LCD_LINE_4,3)
+
+    elif page == 2:
+      #Page 2
+      print("RMS offset: ")
+      print(chronyResult[34] + " s")
+      print("Frequency: ")
+      print(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
+      lcd_string("RMS offset: ",LCD_LINE_1,1)
+      lcd_string(chronyResult[34] + " s",LCD_LINE_2,3)
+      lcd_string("Frequency: ",LCD_LINE_3,1)
+      lcd_string(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40],LCD_LINE_4,3)
+
+    elif page == 3:
+      #Page 3
+      print("Residual frequency: ")
+      print(chronyResult[44] + " " + chronyResult[45])
+      print("Skew: ")
+      print(chronyResult[48] + " " + chronyResult[49])
+      lcd_string("Residual frequency: ",LCD_LINE_1,1)
+      lcd_string(chronyResult[44] + " " + chronyResult[45],LCD_LINE_2,3)
+      lcd_string("Skew: ",LCD_LINE_3,1)
+      lcd_string(chronyResult[48] + " " + chronyResult[49],LCD_LINE_4,3)
+
+    elif page == 4:
+      #Page 4
+      print("Root delay: ")
+      print(chronyResult[53] + " sec")
+      print("Root dispersion: ")
+      print(chronyResult[58] + " sec")
+      lcd_string("Root delay: ",LCD_LINE_1,1)
+      lcd_string(chronyResult[53] + " sec",LCD_LINE_2,3)
+      lcd_string("Root dispersion: ",LCD_LINE_3,1)
+      lcd_string(chronyResult[58] + " sec",LCD_LINE_4,3)
+
+    elif page == 5:
+      #Page 5
+      print("Update Interval:")
+      print(chronyResult[63] + " sec")
+      print("Leap Status: ")
+      print(chronyResult[68])
+      lcd_string("Update Interval:",LCD_LINE_1,1)
+      lcd_string(chronyResult[63] + " sec",LCD_LINE_2,3)
+      lcd_string("Leap Year Status: ",LCD_LINE_3,1)
+      lcd_string(chronyResult[68],LCD_LINE_4,3)
+
+    time.sleep(delay)
+
+    # Debugging to display list elements for above choices
+    #  for count, item in enumerate(chronyResult):
+    #  print (count, item)
+    
+ except Exception as e:
+    print(e)
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("* !chronyc Error!  *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("*  chronyc Error   *",LCD_LINE_2,2)
+    lcd_string("*  or no gps data  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
-    exit(1)
-
-  #Split chronyc output into element list
-  chronyResult = output.split()
-
-  #Output stats to console and LCD
-
-  if page == 1:
-    #Page 1
-    print("System Time: ")
-    print(chronyResult[20] + " " + "s " + chronyResult[22])
-    print("Last offset: ")
-    print(chronyResult[29] + " s")
-    lcd_string("System Time: ",LCD_LINE_1,1)
-    lcd_string(chronyResult[20] + " " + "s " + chronyResult[22],LCD_LINE_2,3)
-    lcd_string("Last offset: ",LCD_LINE_3,1)
-    lcd_string(chronyResult[29] + " s",LCD_LINE_4,3)
-
-  elif page == 2:
-    #Page 2
-    print("RMS offset: ")
-    print(chronyResult[34] + " s")
-    print("Frequency: ")
-    print(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
-    lcd_string("RMS offset: ",LCD_LINE_1,1)
-    lcd_string(chronyResult[34] + " s",LCD_LINE_2,3)
-    lcd_string("Frequency: ",LCD_LINE_3,1)
-    lcd_string(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40],LCD_LINE_4,3)
-
-  elif page == 3:
-    #Page 3
-    print("Residual frequency: ")
-    print(chronyResult[44] + " " + chronyResult[45])
-    print("Skew: ")
-    print(chronyResult[48] + " " + chronyResult[49])
-    lcd_string("Residual frequency: ",LCD_LINE_1,1)
-    lcd_string(chronyResult[44] + " " + chronyResult[45],LCD_LINE_2,3)
-    lcd_string("Skew: ",LCD_LINE_3,1)
-    lcd_string(chronyResult[48] + " " + chronyResult[49],LCD_LINE_4,3)
-
-  elif page == 4:
-    #Page 4
-    print("Root delay: ")
-    print(chronyResult[53] + " sec")
-    print("Root dispersion: ")
-    print(chronyResult[58] + " sec")
-    lcd_string("Root delay: ",LCD_LINE_1,1)
-    lcd_string(chronyResult[53] + " sec",LCD_LINE_2,3)
-    lcd_string("Root dispersion: ",LCD_LINE_3,1)
-    lcd_string(chronyResult[58] + " sec",LCD_LINE_4,3)
-
-  elif page == 5:
-    #Page 5
-    print("Update Interval:")
-    print(chronyResult[63] + " sec")
-    print("Leap Status: ")
-    print(chronyResult[68])
-    lcd_string("Update Interval:",LCD_LINE_1,1)
-    lcd_string(chronyResult[63] + " sec",LCD_LINE_2,3)
-    lcd_string("Leap Year Status: ",LCD_LINE_3,1)
-    lcd_string(chronyResult[68],LCD_LINE_4,3)
-
-  time.sleep(delay)
-
-# Debugging to display list elements for above choices
-#  for count, item in enumerate(chronyResult):
-#  print (count, item)
 
 def blank_display():
   # Blank display
