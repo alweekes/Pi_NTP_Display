@@ -333,7 +333,7 @@ def displayChronyStats(page, delay):
 #  for count, item in enumerate(chronyResult):
 #  print (count, item)
 
-def blank_display()
+def blank_display():
   # Blank display
   lcd_byte(0x01, LCD_CMD)
 
