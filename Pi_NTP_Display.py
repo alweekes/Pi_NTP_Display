@@ -294,7 +294,7 @@ def displayChronyStats(page, delay):
     #  for count, item in enumerate(chronyResult):
     #  print (count, item)
     
- except Exception as e:
+  except Exception as e:
     print(e)
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
