@@ -233,9 +233,9 @@ def displayGPSData(page, delay):
     print(pdop)
     print(hdop)
     print(vdop)
-    lcd_string(fix,LCD_LINE_3,1)
-    lcd_string(pdop,LCD_LINE_1,1)
-    lcd_string(hdop,LCD_LINE_2,1)
+    lcd_string(fix,LCD_LINE_1,1)
+    lcd_string(pdop,LCD_LINE_2,1)
+    lcd_string(hdop,LCD_LINE_3,1)
     lcd_string(vdop,LCD_LINE_4,1)
 
   time.sleep(delay)
