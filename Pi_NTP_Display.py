@@ -116,8 +116,9 @@ def main():
       i += 1
 
 def displayTime(cycles):
-  # Blank display
-  lcd_byte(0x01, LCD_CMD)
+  
+  blank_display()
+  
   # Initialise cycl count
   x=1
 
@@ -160,6 +161,11 @@ def displayGPSData(page, delay):
     output = e.output
     returncode = e.returncode
     print (returncode)
+    blank_display()
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("*  gpspipe error!  *",LCD_LINE_2,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2)
     exit(1)
 
   #Split output into list elements
@@ -169,7 +175,16 @@ def displayGPSData(page, delay):
   pattern = "$GPGGA"
   gpgga = [x for x in gpsPipe if x.startswith(pattern)]
   # pynmea2 can't process list, so pick first available item in list
-  msg = pynmea2.parse(gpgga[0])
+  try:
+    msg = pynmea2.parse(gpgga[0])
+  except Exception as e:
+    print(e)
+    blank_display()
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("*  !No Valid GPS!  *",LCD_LINE_2,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2)
+    exit(1)
 
   #Get data from $GPGGA message (number of satellites, lat, long, height)
   satellites = ("Satellites: " + msg.num_sats)
@@ -181,7 +196,16 @@ def displayGPSData(page, delay):
   pattern = "$GPGSA"
   gpgsa = [x for x in gpsPipe if x.startswith(pattern)]
   # pynmea2 can't process list, so pick first available item in list
-  dop = pynmea2.parse(gpgsa[0])
+  try:
+    dop = pynmea2.parse(gpgsa[0])
+  except Exception as e:
+    print(e)
+    blank_display()
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("*  !No Valid GPS!  *",LCD_LINE_2,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2)
+    exit(1)
 
   #Get data from $GPGSA message for fix status and DOP
   readable_fix = ("No fix", "2D Fix", "3D Fix")
@@ -190,8 +214,7 @@ def displayGPSData(page, delay):
   hdop = ("HDOP: " + dop.hdop)
   vdop = ("VDOP: " + dop.vdop)
 
-  # Blank display
-  lcd_byte(0x01, LCD_CMD)
+  blank_display
 
   if page == 1:
     #Page 1
@@ -232,6 +255,11 @@ def displayChronyStats(page, delay):
     output = e.output
     returncode = e.returncode
     print (returncode)
+    blank_display()
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("* !chronyc Error!  *",LCD_LINE_2,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2)
     exit(1)
 
   #Split chronyc output into element list
@@ -305,6 +333,9 @@ def displayChronyStats(page, delay):
 #  for count, item in enumerate(chronyResult):
 #  print (count, item)
 
+def blank_display()
+  # Blank display
+  lcd_byte(0x01, LCD_CMD)
 
 def lcd_init():
   # Initialise display
@@ -390,7 +421,7 @@ if __name__ == '__main__':
   except KeyboardInterrupt:
     pass
   finally:
-    lcd_byte(0x01, LCD_CMD)
+    blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  System Stopped  *",LCD_LINE_2,2)
     lcd_string("*                  *",LCD_LINE_3,2)
