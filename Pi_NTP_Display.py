@@ -84,7 +84,7 @@ def main():
   lcd_string("NTP Time Server",LCD_LINE_2,2)
   lcd_string("v1.0 28/12/23",LCD_LINE_3,2)
   lcd_string("Andrew L. Weekes",LCD_LINE_4,2)
-  time.sleep(2) # 20 second delay
+  time.sleep(2) # 2 second delay
 
   #Time to display each stats page (seconds)
   stats_delay = 2
