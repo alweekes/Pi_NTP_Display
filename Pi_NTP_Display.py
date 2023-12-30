@@ -225,8 +225,8 @@ def displayGPSData(page, delay):
 
 
 def displayChronyStats(page, delay):
-  # Blank display
-  lcd_byte(0x01, LCD_CMD)
+  
+  blank_display()
 
   try:
     output = subprocess.check_output("chronyc tracking", shell=True, text=True)
