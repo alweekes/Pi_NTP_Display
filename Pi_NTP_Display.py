@@ -215,7 +215,7 @@ def displayGPSData(page, delay):
   
   except Exception as e:
     print(e)
-    print(" gpspipe error or no gps data ")
+    print("gpspipe error or no gps data")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
