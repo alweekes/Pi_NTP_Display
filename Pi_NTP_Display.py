@@ -137,13 +137,11 @@ def displayTime(cycles):
     #Update only if changed
     if datestr != now.strftime("%b %d, %Y"):
       datestr = now.strftime("%b %d, %Y")
-      os.system('clear')
       print(datestr)
       lcd_string(datestr,LCD_LINE_3,2)
 
     if timestr != now.strftime("%H:%M:%S"):
       timestr = now.strftime("%H:%M:%S")
-      os.system('clear')
       print(timestr)
       lcd_string(timestr,LCD_LINE_4,2)
 
@@ -269,7 +267,6 @@ def displayChronyStats(page, delay):
 
   if page == 1:
     #Page 1
-    os.system('clear')
     print("System Time: ")
     print(chronyResult[20] + " " + "s " + chronyResult[22])
     print("Last offset: ")
@@ -281,7 +278,6 @@ def displayChronyStats(page, delay):
 
   elif page == 2:
     #Page 2
-    os.system('clear')
     print("RMS offset: ")
     print(chronyResult[34] + " s")
     print("Frequency: ")
@@ -293,7 +289,6 @@ def displayChronyStats(page, delay):
 
   elif page == 3:
     #Page 3
-    os.system('clear')
     print("Residual frequency: ")
     print(chronyResult[44] + " " + chronyResult[45])
     print("Skew: ")
@@ -305,7 +300,6 @@ def displayChronyStats(page, delay):
 
   elif page == 4:
     #Page 4
-    os.system('clear')
     print("Root delay: ")
     print(chronyResult[53] + " sec")
     print("Root dispersion: ")
@@ -317,7 +311,6 @@ def displayChronyStats(page, delay):
 
   elif page == 5:
     #Page 5
-    os.system('clear')
     print("Update Interval:")
     print(chronyResult[63] + " sec")
     print("Leap Status: ")
