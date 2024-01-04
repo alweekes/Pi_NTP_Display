@@ -175,32 +175,36 @@ def displayNetworkData(page, delay):
     rx = ("RX bytes: " + linkData[26])
     tx = ("TX bytes: " + linkData[39])
 
-    #Print Data
-
-    #Page 1
-    print (port)
-    print (state)
-    print (ip)
-    print (mac)
-
-    #Page 2
-    print (mtu)
-    print (rx)
-    print (tx)
     
+    #Print Data
+    if page ==1:
+      #Page 1
+      print (port)
+      lcd_string(port,LCD_LINE_1,1)
+      print (state)
+      lcd_string(state,LCD_LINE_2,1)
+      print (ip)
+      lcd_string(ip,LCD_LINE_3,1)
+      print (mac)
+      lcd_string(mac,LCD_LINE_4,1)
 
-    # Debugging to display list elements for above choices
-    #for count, item in enumerate(linkData):
-    #  print (count, item)
+    elif page == 2:
+      #Page 2
+      print (mtu)
+      lcd_string(mtu,LCD_LINE_1,1)
+      print (rx)
+      lcd_string(rx,LCD_LINE_1,1)
+      print (tx)
+      lcd_string(tx,LCD_LINE_1,1)
 
   except Exception as e:
     print(e)
-    print("network error")
-    #blank_display()
-    #lcd_string("********************",LCD_LINE_1,2)
-    #lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
-    #lcd_string("*  or no gps data  *",LCD_LINE_3,2)
-    #lcd_string("********************",LCD_LINE_4,2)
+    print("Network error")
+    blank_display()
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("*  Network error   *",LCD_LINE_2,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2)
     
   time.sleep(delay)
   
@@ -265,11 +269,7 @@ def displayGPSData(page, delay):
       lcd_string(vdop,LCD_LINE_4,1)
 
     time.sleep(delay)
-    
-    # Debugging to display list elements for above choices
-    # for count, item in enumerate(gpsPipe):
-    #   print (count, item)
-  
+ 
   except Exception as e:
     print(e)
     print("gpspipe error or no gps data")
@@ -349,10 +349,7 @@ def displayChronyStats(page, delay):
 
     time.sleep(delay)
 
-    # Debugging to display list elements for above choices
-    #  for count, item in enumerate(chronyResult):
-    #  print (count, item)
-    
+  
   except Exception as e:
     print(e)
     print("chronyc error or no gps data")
