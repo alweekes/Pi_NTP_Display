@@ -304,66 +304,84 @@ def displayChronyStats(page, delay):
     #Split chronyc output into element list
     chronyResult = output.split()
     
+    systemTime = (chronyResult[20] + " " + "s " + chronyResult[22])
+    lastOffset = (chronyResult[29] + " s")
+    
+    rmsOffset = (chronyResult[34] + " s")
+    freq = (chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
+    
+    resFreq = (chronyResult[44] + " " + chronyResult[45])
+    skew = (chronyResult[48] + " " + chronyResult[49])
+
+    rootDly = (chronyResult[53] + " sec")
+    rootDisp = (chronyResult[58] + " sec")
+
+    upInt = (chronyResult[63] + " sec")
+    lpStat = (chronyResult[68])
+
+    
+
+
     #Output stats to console and LCD
     if page == 1:
       #Page 1
       blank_display()
-      print("System Time: ")
-      print(chronyResult[20] + " " + "s " + chronyResult[22])
-      print("Last offset: ")
-      print(chronyResult[29] + " s")
+      print("System Time:")
+      print(systemTime)
+      print ("Last Offset:")
+      print(lastOffset)
       lcd_string("System Time: ",LCD_LINE_1,1)
-      lcd_string(chronyResult[20] + " " + "s " + chronyResult[22],LCD_LINE_2,3)
+      lcd_string(systemTime,LCD_LINE_2,3)
       lcd_string("Last offset: ",LCD_LINE_3,1)
-      lcd_string(chronyResult[29] + " s",LCD_LINE_4,3)
+      lcd_string(lastOffset,LCD_LINE_4,3)
 
     elif page == 2:
       #Page 2
       blank_display()
       print("RMS offset: ")
-      print(chronyResult[34] + " s")
+      print(rmsOffset)
       print("Frequency: ")
-      print(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
+      print(freq)
       lcd_string("RMS offset: ",LCD_LINE_1,1)
-      lcd_string(chronyResult[34] + " s",LCD_LINE_2,3)
+      lcd_string(rmsOffset)
       lcd_string("Frequency: ",LCD_LINE_3,1)
-      lcd_string(chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40],LCD_LINE_4,3)
+      lcd_string(freq,LCD_LINE_4,3)
 
     elif page == 3:
       #Page 3
       blank_display()
       print("Residual frequency: ")
-      print(chronyResult[44] + " " + chronyResult[45])
+      print(resFreq)
       print("Skew: ")
-      print(chronyResult[48] + " " + chronyResult[49])
+      print(skew)
       lcd_string("Residual frequency: ",LCD_LINE_1,1)
-      lcd_string(chronyResult[44] + " " + chronyResult[45],LCD_LINE_2,3)
+      lcd_string(resFreq,LCD_LINE_2,3)
       lcd_string("Skew: ",LCD_LINE_3,1)
-      lcd_string(chronyResult[48] + " " + chronyResult[49],LCD_LINE_4,3)
+      lcd_string(skew,LCD_LINE_4,3)
 
     elif page == 4:
       #Page 4
       blank_display()
       print("Root delay: ")
-      print(chronyResult[53] + " sec")
+      print(rootDly)
       print("Root dispersion: ")
-      print(chronyResult[58] + " sec")
+      print(rootDisp)
       lcd_string("Root delay: ",LCD_LINE_1,1)
-      lcd_string(chronyResult[53] + " sec",LCD_LINE_2,3)
+      lcd_string(rootDly,LCD_LINE_2,3)
       lcd_string("Root dispersion: ",LCD_LINE_3,1)
-      lcd_string(chronyResult[58] + " sec",LCD_LINE_4,3)
+      lcd_string(rootDisp,LCD_LINE_4,3)
 
     elif page == 5:
       #Page 5
       blank_display()
       print("Update Interval:")
-      print(chronyResult[63] + " sec")
+      print(upInt)
       print("Leap Status: ")
-      print(chronyResult[68])
+      print(lpStat)
       lcd_string("Update Interval:",LCD_LINE_1,1)
-      lcd_string(chronyResult[63] + " sec",LCD_LINE_2,3)
+      lcd_string(upInt,LCD_LINE_2,3)
       lcd_string("Leap Year Status: ",LCD_LINE_3,1)
-      lcd_string(chronyResult[68],LCD_LINE_4,3)
+      lcd_string(lpStat,LCD_LINE_4,3)
 
     time.sleep(delay)
 
