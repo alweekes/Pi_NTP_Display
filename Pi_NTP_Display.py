@@ -159,7 +159,7 @@ def displayNetworkData(page, delay):
     #Split data into list elements
     netData = output.split()
     # Debugging to display list elements for above choices
-    for count, item in enumerate(netdata):
+    for count, item in enumerate(netData):
       print (count, item)
 
   except Exception as e:
