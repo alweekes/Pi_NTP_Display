@@ -175,6 +175,20 @@ def displayNetworkData(page, delay):
     rx = ("RX bytes: " + linkData[26])
     tx = ("TX bytes: " + linkData[39])
 
+    #Print Data
+
+    #Page 1
+    print (port)
+    print (state)
+    print (ip)
+    print (mac)
+
+    #Page 2
+    print (mtu)
+    print (rx)
+    print (tx)
+    
+
     # Debugging to display list elements for above choices
     #for count, item in enumerate(linkData):
     #  print (count, item)
