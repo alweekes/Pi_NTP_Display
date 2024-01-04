@@ -164,16 +164,20 @@ def displayNetworkData(page, delay):
     addrData = addr.split()
     linkData = link.split()
 
-    #Get data from list items
-    port = (addrData[1])
-    state = (addrData[8])
-    ip = (addrData[18])
-    mac = (addrData[14])
+    #Get address data from list items
+    port = ("Port: " + addrData[1])
+    state = ("Network state: " + addrData[8])
+    ip = ("IP Addr: " + addrData[18])
+    mac = ("MAC Addr: " + addrData[14])
 
+    #Get link stats from list items
+    mtu = ("MTU: " + linkData[4])
+    rx = ("RX bytes: " + linkData[26])
+    tx = ("TX bytes: " + linkData[39])
 
     # Debugging to display list elements for above choices
-    for count, item in enumerate(linkData):
-      print (count, item)
+    #for count, item in enumerate(linkData):
+    #  print (count, item)
 
   except Exception as e:
     print(e)
