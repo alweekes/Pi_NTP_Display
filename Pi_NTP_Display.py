@@ -87,7 +87,7 @@ def main():
   time.sleep(2) # 2 second delay
 
   # Time to display each stats page (seconds)
-  stats_delay = 2
+  stats_delay = 3
   # Time to display time page (seconds)
   time_cycles = 10
   # Number of GPS data chronyPages
