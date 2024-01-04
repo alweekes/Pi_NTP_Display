@@ -166,14 +166,14 @@ def displayNetworkData(page, delay):
 
     #Get address data from list items
     port = ("Port: " + addrData[1])
-    state = ("Network state: " + addrData[8])
-    ip = ("IP Addr: " + addrData[18])
-    mac = ("MAC Addr: " + addrData[14])
+    state = ("Network status: " + addrData[8])
+    ip = ("IP: " + addrData[18])
+    mac = ("MAC: " + addrData[14])
 
     #Get link stats from list items
     mtu = ("MTU: " + linkData[4])
-    rx = ("RX bytes: " + linkData[26])
-    tx = ("TX bytes: " + linkData[39])
+    rx = ("RX: " + linkData[26])
+    tx = ("TX: " + linkData[39])
 
     
     #Print Data
