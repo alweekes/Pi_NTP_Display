@@ -154,9 +154,13 @@ def displayNetworkData(page, delay):
   
   #Get ip address
   try:
-    output = subprocess.check_output("hostname --all-ip-addresses", shell=True, text=True)
-    print (output)
-    lcd_string("IP: " + str(output),LCD_LINE_1,1)
+    output = subprocess.check_output("ip add show dev eth0", shell=True, text=True)
+        
+    #Split data into list elements
+    netData = output.split()
+    # Debugging to display list elements for above choices
+    for count, item in enumerate(netdata):
+      print (count, item)
 
   except Exception as e:
     print(e)
