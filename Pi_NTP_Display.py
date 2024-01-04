@@ -165,15 +165,15 @@ def displayNetworkData(page, delay):
     linkData = link.split()
 
     #Get address data from list items
-    port = ("Port: " + addrData[1])
-    state = ("Network status: " + addrData[8])
-    ip = ("IP: " + addrData[18])
-    mac = ("MAC: " + addrData[14])
+    port = ("Port:" + addrData[1])
+    state = ("Network status:" + addrData[8])
+    ip = ("IP:" + addrData[18])
+    mac = ("MAC:" + addrData[14])
 
     #Get link stats from list items
-    mtu = ("MTU: " + linkData[4])
-    rx = ("RX: " + linkData[26])
-    tx = ("TX: " + linkData[39])
+    mtu = ("MTU:" + linkData[4])
+    rx = ("RX:" + linkData[26])
+    tx = ("TX:" + linkData[39])
 
     
     #Print Data
