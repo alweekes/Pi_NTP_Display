@@ -188,6 +188,7 @@ def displayNetworkData(page, delay):
     #Print Data
     if page ==1:
       #Page 1
+      blank_display()
       print (port)
       lcd_string(port,LCD_LINE_1,1)
       print (state)
@@ -199,6 +200,7 @@ def displayNetworkData(page, delay):
 
     elif page == 2:
       #Page 2
+      blank_display()
       print (mtu)
       lcd_string(mtu,LCD_LINE_1,1)
       print (rx)
@@ -257,6 +259,7 @@ def displayGPSData(page, delay):
 
     if page == 1:
       #Page 1
+      blank_display()
       print(satellites)
       print(latitude)
       print(longitude)
@@ -268,6 +271,7 @@ def displayGPSData(page, delay):
 
     elif page == 2:
       #Page 2
+      blank_display()
       print(fix)
       print(pdop)
       print(hdop)
@@ -303,6 +307,7 @@ def displayChronyStats(page, delay):
     #Output stats to console and LCD
     if page == 1:
       #Page 1
+      blank_display()
       print("System Time: ")
       print(chronyResult[20] + " " + "s " + chronyResult[22])
       print("Last offset: ")
@@ -314,6 +319,7 @@ def displayChronyStats(page, delay):
 
     elif page == 2:
       #Page 2
+      blank_display()
       print("RMS offset: ")
       print(chronyResult[34] + " s")
       print("Frequency: ")
@@ -325,6 +331,7 @@ def displayChronyStats(page, delay):
 
     elif page == 3:
       #Page 3
+      blank_display()
       print("Residual frequency: ")
       print(chronyResult[44] + " " + chronyResult[45])
       print("Skew: ")
@@ -336,6 +343,7 @@ def displayChronyStats(page, delay):
 
     elif page == 4:
       #Page 4
+      blank_display()
       print("Root delay: ")
       print(chronyResult[53] + " sec")
       print("Root dispersion: ")
@@ -347,6 +355,7 @@ def displayChronyStats(page, delay):
 
     elif page == 5:
       #Page 5
+      blank_display()
       print("Update Interval:")
       print(chronyResult[63] + " sec")
       print("Leap Status: ")
