@@ -289,7 +289,7 @@ def displayGPSData(page, delay):
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
-    lcd_string("*  or no gps data  *",LCD_LINE_3,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
     time.sleep(delay)
 
@@ -391,7 +391,7 @@ def displayChronyStats(page, delay):
     print("chronyc error or no gps data")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  chronyc Error   *",LCD_LINE_2,2)
+    lcd_string("*  chronyc error   *",LCD_LINE_2,2)
     lcd_string("*                  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
     time.sleep(delay)
@@ -487,7 +487,7 @@ if __name__ == '__main__':
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  System Stopped  *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
+    lcd_string("*     Goodbye!     *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
 
     GPIO.cleanup()
