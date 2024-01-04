@@ -86,20 +86,29 @@ def main():
   lcd_string("Andrew L. Weekes",LCD_LINE_4,2)
   time.sleep(2) # 2 second delay
 
-  #Time to display each stats page (seconds)
+  # Time to display each stats page (seconds)
   stats_delay = 2
-  #Time to display time page (seconds)
+  # Time to display time page (seconds)
   time_cycles = 10
-  #Number of GPS data chronyPages
+  # Number of GPS data chronyPages
   gpsPages = 2
-  #Number of chronyStats chronyPages
+  # Number of chronyStats chronyPages
   chronyPages = 5
+  # Number of pages of network stats
+  netPages = 2
 
   while True:
 
-    # Display network stats
-    displayNetworkData(1,10)
-    # Alternately display time and GPS data
+    # Display time and network stats alternately
+    i = 1
+    while i <= netPages:
+      displayTime(time_cycles)
+      displayNetworkData(i, stats_delay)
+      if i == netPages:
+        break
+      i += 1
+
+    # Display time and GPS data alternately
     i = 1
     while i <= gpsPages:
       displayTime(time_cycles)
@@ -108,7 +117,7 @@ def main():
         break
       i += 1
 
-    #Alternately display time and chrony stats
+    # Display time and chrony stats alternately
     i = 1
     while i <= chronyPages:
       displayTime(time_cycles)
