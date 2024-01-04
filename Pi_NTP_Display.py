@@ -154,7 +154,7 @@ def displayNetworkData(page, delay):
   
   #Get ip address
   try:
-    output = subprocess.check_output(["hostname --all-ip-addresses", shell=True, text=True])
+    output = subprocess.check_output("hostname --all-ip-addresses", shell=True, text=True)
     print (output)
     lcd_string("IP: " + str(output),LCD_LINE_1,1)
 
