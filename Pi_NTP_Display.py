@@ -155,8 +155,9 @@ def displayNetworkData(page, delay):
   #Get ip address
   try:
     output = subprocess.check_output(['hostname', '--all-ip-addresses'])
-    print (output)
-    lcd_string("IP: " + str(output.decode(ascii)),LCD_LINE_1,1)
+    output_str = output.decode(ascii)
+    print (output_str)
+    lcd_string("IP: " + str(output_str),LCD_LINE_1,1)
 
   except Exception as e:
     print(e)
