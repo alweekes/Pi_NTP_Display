@@ -79,7 +79,7 @@ def main():
   # Initialise display
   lcd_init()
 
-  # Send some centred test
+  # Startup message
   lcd_string("GPS Disciplined",LCD_LINE_1,2)
   lcd_string("NTP Time Server",LCD_LINE_2,2)
   lcd_string("v1.0 28/12/23",LCD_LINE_3,2)
@@ -97,6 +97,8 @@ def main():
 
   while True:
 
+    # Display network stats
+    displayNetworkData(1,10)
     # Alternately display time and GPS data
     i = 1
     while i <= gpsPages:
@@ -148,6 +150,25 @@ def displayTime(cycles):
     x += 1
     time.sleep(1)
 
+def displayNetworkData(page, delay)
+  
+  #Get ip address
+  try:
+    output = subprocess.check_output(['hostname', '--all-ip-addresses'])
+    print (output)
+
+  except Exception as e:
+    print(e)
+    print("network error")
+    #blank_display()
+    #lcd_string("********************",LCD_LINE_1,2)
+    #lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
+    #lcd_string("*  or no gps data  *",LCD_LINE_3,2)
+    #lcd_string("********************",LCD_LINE_4,2)
+    
+  time.sleep(delay)
+  
+  
 def displayGPSData(page, delay):
 
   # Get output of gpspipe, output is native GPSD JSON sentences + NMEA messages
