@@ -174,10 +174,10 @@ def displayNetworkData(page, delay):
     linkData = link.split()
 
     #Get address data from list items
-    port = ("Port: " + addrData[1]).center(LCD_WIDTH," ")
-    state = ("Network status: " + addrData[8]).center(LCD_WIDTH," ")
-    ip = ("IP: " + addrData[18].strip("/24)")).center(LCD_WIDTH," ")
-    mac = ("MAC: " + addrData[14].replace(":","")).center(LCD_WIDTH," ")
+    port = ("Port: " + addrData[1])
+    state = ("Network status: " + addrData[8])
+    ip = ("IP: " + addrData[18].strip("/24)"))
+    mac = ("MAC: " + addrData[14].replace(":",""))
 
     #Get link stats from list items
     mtu = ("MTU: " + linkData[4])
