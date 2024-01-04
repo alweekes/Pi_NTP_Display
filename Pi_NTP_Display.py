@@ -154,12 +154,25 @@ def displayNetworkData(page, delay):
   
   #Get ip address
   try:
-    output = subprocess.check_output("ip add show dev eth0", shell=True, text=True)
+    #Get address and port data
+    addr = subprocess.check_output("ip add show dev eth0", shell=True, text=True)
+    
+    #Get link stats
+    link = subprocess.check_output("ip -s link show eth0", shell=True, text=True)
         
     #Split data into list elements
-    netData = output.split()
+    addrData = addr.split()
+    linkData = link.split()
+
+    #Get data from list items
+    port = (addrData[1])
+    state = (addrData[8])
+    ip = (addrData[18])
+    mac = (addrData[14])
+
+
     # Debugging to display list elements for above choices
-    for count, item in enumerate(netData):
+    for count, item in enumerate(linkData):
       print (count, item)
 
   except Exception as e:
