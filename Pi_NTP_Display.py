@@ -177,7 +177,7 @@ def displayNetworkData(page, delay):
     port = ("Port: " + addrData[1])
     state = ("Network status: " + addrData[8])
     ip = ("IP: " + addrData[18].strip("/24)"))
-    mac = ("MAC: " + addrData[14].strip(":"))
+    mac = ("MAC: " + addrData[14].replace(":",""))
 
     #Get link stats from list items
     mtu = ("MTU: " + linkData[4])
