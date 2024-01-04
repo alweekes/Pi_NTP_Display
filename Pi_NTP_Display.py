@@ -150,7 +150,7 @@ def displayTime(cycles):
     x += 1
     time.sleep(1)
 
-def displayNetworkData(page, delay)
+def displayNetworkData(page, delay):
   
   #Get ip address
   try:
