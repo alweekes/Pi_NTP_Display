@@ -343,7 +343,7 @@ def displayChronyStats(page, delay):
       print("Frequency: ")
       print(freq)
       lcd_string("RMS offset: ",LCD_LINE_1,1)
-      lcd_string(rmsOffset)
+      lcd_string(rmsOffset, LCD_LINE_2,3)
       lcd_string("Frequency: ",LCD_LINE_3,1)
       lcd_string(freq,LCD_LINE_4,3)
 
@@ -392,7 +392,7 @@ def displayChronyStats(page, delay):
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  chronyc Error   *",LCD_LINE_2,2)
-    lcd_string("*  or no gps data  *",LCD_LINE_3,2)
+    lcd_string("*                  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
     time.sleep(delay)
 
