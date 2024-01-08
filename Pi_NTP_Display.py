@@ -171,8 +171,8 @@ def displayMemData(delay):
     memData = mem.split()
     
     memTotal = ("Total: " + memData[8])
-    memUsed = ("Used: " + memdata[9])
-    memFree = ("Free: " + memdata[10])
+    memUsed = ("Used: " + memData[9])
+    memFree = ("Free: " + memData[10])
 
     blank_display()
     print ("Memory Stats")
