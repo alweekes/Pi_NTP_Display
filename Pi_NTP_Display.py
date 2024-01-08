@@ -170,6 +170,15 @@ def displayMemData(page, delay):
     for (i, item) in enumerate (memData, start=1):
       print (i, item)
 
+  except Exception as e:
+    print(e)
+    print("Error getting memory stats")
+    blank_display()
+    lcd_string("********************",LCD_LINE_1,2)
+    lcd_string("*   Memory stats   *",LCD_LINE_2,2)
+    lcd_string("*      error       *",LCD_LINE_3,2)
+    lcd_string("********************",LCD_LINE_4,2
+
 def displayNetworkData(page, delay):
   
   #Get ip address
