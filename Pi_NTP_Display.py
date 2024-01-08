@@ -108,8 +108,8 @@ def main():
         break
       i += 1
 
-    # Display time and memory stats
-    displayMemData(10)
+    # Display memory stats
+    displayMemData(stats_delay)
 
     # Display time and GPS data alternately
     i = 1
