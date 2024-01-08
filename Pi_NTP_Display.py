@@ -108,6 +108,9 @@ def main():
         break
       i += 1
 
+    # Display time and memory stats
+    displayMemStats(1,10)
+
     # Display time and GPS data alternately
     i = 1
     while i <= gpsPages:
@@ -178,6 +181,8 @@ def displayMemData(page, delay):
     lcd_string("*   Memory stats   *",LCD_LINE_2,2)
     lcd_string("*      error       *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
+
+  time.sleep(delay)
 
 def displayNetworkData(page, delay):
   
