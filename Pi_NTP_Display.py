@@ -177,7 +177,7 @@ def displayMemData(page, delay):
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*   Memory stats   *",LCD_LINE_2,2)
     lcd_string("*      error       *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2
+    lcd_string("********************",LCD_LINE_4,2)
 
 def displayNetworkData(page, delay):
   
