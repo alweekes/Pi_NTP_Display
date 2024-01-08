@@ -109,7 +109,7 @@ def main():
       i += 1
 
     # Display time and memory stats
-    displayMemData(1,10)
+    displayMemData(10)
 
     # Display time and GPS data alternately
     i = 1
@@ -162,7 +162,7 @@ def displayTime(cycles):
     x += 1
     time.sleep(1)
 
-def displayMemData(page, delay):
+def displayMemData(delay):
 
   #Get memory useage stats
   try:
@@ -170,8 +170,20 @@ def displayMemData(page, delay):
     
     memData = mem.split()
     
-    for (i, item) in enumerate (memData, start=1):
-      print (i, item)
+    memTotal = ("Total: " + memData[8])
+    memUsed = ("Used: " + memdata[9])
+    memFree = ("Free: " + memdata[10])
+
+    blank_display()
+    print ("Memory Stats")
+    lcd_string("Memory Stats",LCD_LINE_1,2)
+    print (memTotal)
+    lcd_string(memTotal,LCD_LINE_2,1)
+    print (memUsed)
+    lcd_string(memUsed,LCD_LINE_3,1)
+    print (memFree)
+    lcd_string(memFree,LCD_LINE_4,1)
+
 
   except Exception as e:
     print(e)
