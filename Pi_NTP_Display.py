@@ -109,7 +109,7 @@ def main():
       i += 1
 
     # Display time and memory stats
-    displayMemStats(1,10)
+    displayMemData(1,10)
 
     # Display time and GPS data alternately
     i = 1
