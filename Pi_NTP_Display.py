@@ -167,7 +167,7 @@ def displayMemData(page, delay):
     
     memData = mem.split()
     
-    for (i, item) in enumerate (memData, start=1)
+    for (i, item) in enumerate (memData, start=1):
     print (i, item)
 
 def displayNetworkData(page, delay):
