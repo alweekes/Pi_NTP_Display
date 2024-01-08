@@ -159,6 +159,17 @@ def displayTime(cycles):
     x += 1
     time.sleep(1)
 
+def displayMemData(page, delay):
+
+  #Get memory useage stats
+  try:
+    mem = subprocess.check_output("free", shell=True, text=True)
+    
+    memData = mem.split()
+    
+    for (i, item) in enumerate (memData, start=1)
+    print (i, item)
+
 def displayNetworkData(page, delay):
   
   #Get ip address
