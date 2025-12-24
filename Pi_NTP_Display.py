@@ -86,7 +86,9 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header('Content-type', 'text/html')
       self.end_headers()
-      
+      # Get current time for JS clock initialization
+      js_timestamp = int(time.time() * 1000)
+
       # Simple HTML Template
       html = """
 <!DOCTYPE html>
@@ -104,12 +106,25 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
         .label { color: #888; }
         .value { color: #0f0; font-weight: bold; }
         .error { color: #f00; }
+        #clock { text-align: center; font-size: 1.5em; color: #fff; margin-bottom: 10px; }
     </style>
+    <script>
+        var serverTime = new Date(%d);
+        function updateClock() {
+            serverTime.setSeconds(serverTime.getSeconds() + 1);
+            document.getElementById('clock').innerText = serverTime.toLocaleTimeString() + " " + serverTime.toLocaleDateString();
+        }
+        setInterval(updateClock, 1000);
+        window.onload = function() {
+            document.getElementById('clock').innerText = serverTime.toLocaleTimeString() + " " + serverTime.toLocaleDateString();
+        }
+    </script>
 </head>
 <body>
     <h1>Pi NTP Server Status</h1>
-    <div style="text-align:center; color:#888; margin-bottom: 20px;">Last Updated: %s</div>
-""" % shared_stats["last_updated"]
+    <div id="clock">Loading...</div>
+    <div style="text-align:center; color:#888; margin-bottom: 20px;">Last Stats Update: %s</div>
+""" % (js_timestamp, shared_stats["last_updated"])
 
       # Memory Section
       mem = shared_stats.get("memory", {})
