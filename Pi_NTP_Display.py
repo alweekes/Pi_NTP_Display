@@ -43,6 +43,20 @@ from datetime import datetime
 import subprocess
 from gps import *
 import re
+import threading
+import http.server
+import socketserver
+import json
+import logging
+
+# Shared dictionary to store statistics for the web page
+shared_stats = {
+    "last_updated": "",
+    "memory": {},
+    "network": {},
+    "gps": {},
+    "chrony": {}
+}
 
 # Define GPIO to LCD mapping
 LCD_RS = 7
@@ -66,8 +80,111 @@ LCD_LINE_4 = 0xD4 # LCD RAM address for the 4th line
 E_PULSE = 0.0005
 E_DELAY = 0.0005
 
+class StatsHandler(http.server.BaseHTTPRequestHandler):
+  def do_GET(self):
+    if self.path == '/':
+      self.send_response(200)
+      self.send_header('Content-type', 'text/html')
+      self.end_headers()
+      
+      # Simple HTML Template
+      html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pi NTP Status</title>
+    <meta http-equiv="refresh" content="5">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: monospace; background: #222; color: #0f0; padding: 20px; max-width: 800px; margin: auto; }
+        .box { border: 1px solid #444; padding: 15px; margin-bottom: 20px; border-radius: 5px; background: #111; }
+        h1 { text-align: center; color: #fff; }
+        h2 { margin-top: 0; color: #ddd; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        .item { margin: 5px 0; display: flex; justify-content: space-between; }
+        .label { color: #888; }
+        .value { color: #0f0; font-weight: bold; }
+        .error { color: #f00; }
+    </style>
+</head>
+<body>
+    <h1>Pi NTP Server Status</h1>
+    <div style="text-align:center; color:#888; margin-bottom: 20px;">Last Updated: %s</div>
+""" % shared_stats["last_updated"]
+
+      # Memory Section
+      mem = shared_stats.get("memory", {})
+      html += """
+    <div class="box">
+        <h2>Memory</h2>
+        <div class="item"><span class="label">Total</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Used</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Free</span><span class="value">%s</span></div>
+    </div>
+""" % (mem.get("total", "N/A"), mem.get("used", "N/A"), mem.get("free", "N/A"))
+
+      # Network Section
+      net = shared_stats.get("network", {})
+      html += """
+    <div class="box">
+        <h2>Network</h2>
+        <div class="item"><span class="label">IP</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">State</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">MAC</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">RX</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">TX</span><span class="value">%s</span></div>
+    </div>
+""" % (net.get("ip", "N/A"), net.get("state", "N/A"), net.get("mac", "N/A"), net.get("rx", "N/A"), net.get("tx", "N/A"))
+
+      # GPS Section
+      gps = shared_stats.get("gps", {})
+      html += """
+    <div class="box">
+        <h2>GPS</h2>
+        <div class="item"><span class="label">Fix</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Satellites</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Lat</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Lon</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Alt</span><span class="value">%s</span></div>
+    </div>
+""" % (gps.get("fix", "N/A"), gps.get("satellites", "N/A"), gps.get("latitude", "N/A"), gps.get("longitude", "N/A"), gps.get("altitude", "N/A"))
+
+      # Chrony Section
+      chrony = shared_stats.get("chrony", {})
+      html += """
+    <div class="box">
+        <h2>Chrony</h2>
+        <div class="item"><span class="label">System Time</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Last Offset</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">RMS Offset</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Frequency</span><span class="value">%s</span></div>
+        <div class="item"><span class="label">Root Delay</span><span class="value">%s</span></div>
+    </div>
+</body>
+</html>
+""" % (chrony.get("system_time", "N/A"), chrony.get("last_offset", "N/A"), chrony.get("rms_offset", "N/A"), chrony.get("frequency", "N/A"), chrony.get("root_delay", "N/A"))
+
+      self.wfile.write(html.encode())
+
+def run_web_server():
+  PORT = 8080
+  Handler = StatsHandler
+  # Allow address reuse to avoid 'Address already in use' errors
+  socketserver.TCPServer.allow_reuse_address = True
+  with socketserver.TCPServer(("", PORT), Handler) as httpd:
+    print(f"Serving at port {PORT}")
+    httpd.serve_forever()
+
 def main():
   # Main program block
+  
+  # Start Web Server in a separate thread
+  try:
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
+    web_thread.start()
+    print("Web server started on port 8080")
+  except Exception as e:
+    print(f"Failed to start web server: {e}")
+
   GPIO.setmode(GPIO.BCM)       # Use BCM GPIO numbers
   GPIO.setup(LCD_E, GPIO.OUT)  # E
   GPIO.setup(LCD_RS, GPIO.OUT) # RS
@@ -141,13 +258,14 @@ def displayTime(cycles):
   lcd_string("Date and Time",LCD_LINE_1,2)
   lcd_string("--------------------",LCD_LINE_2,2)
 
- #Initialise time and date stringa
+  #Initialise time and date stringa
   timestr = ""
   datestr = ""
 
   while x < cycles:
     #Get current date and time
     now = datetime.now()
+    shared_stats["last_updated"] = now.strftime("%Y-%m-%d %H:%M:%S")
 
     #Update only if changed
     if datestr != now.strftime("%b %d, %Y"):
@@ -163,18 +281,32 @@ def displayTime(cycles):
     x += 1
     time.sleep(1)
 
+def get_mem_data():
+  try:
+    mem = subprocess.check_output("free", shell=True, text=True)
+    memData = mem.split()
+    
+    memTotal = memData[8]
+    memUsed = memData[9]
+    memFree = memData[10]
+    
+    shared_stats["memory"] = {
+      "total": memTotal,
+      "used": memUsed,
+      "free": memFree
+    }
+    
+    return ("Total: " + memTotal), ("Used: " + memUsed), ("Free: " + memFree)
+  except Exception as e:
+    print(f"Error getting memory stats: {e}")
+    return None, None, None
+
 def displayMemData(delay):
 
   #Get memory useage stats
-  try:
-    mem = subprocess.check_output("free", shell=True, text=True)
-    
-    memData = mem.split()
-    
-    memTotal = ("Total: " + memData[8])
-    memUsed = ("Used: " + memData[9])
-    memFree = ("Free: " + memData[10])
-
+  memTotal, memUsed, memFree = get_mem_data()
+  
+  if memTotal:
     blank_display()
     print ("Memory Stats")
     lcd_string("Memory Stats",LCD_LINE_1,2)
@@ -184,10 +316,7 @@ def displayMemData(delay):
     lcd_string(memUsed,LCD_LINE_3,1)
     print (memFree)
     lcd_string(memFree,LCD_LINE_4,1)
-
-
-  except Exception as e:
-    print(e)
+  else:
     print("Error getting memory stats")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
@@ -197,31 +326,63 @@ def displayMemData(delay):
 
   time.sleep(delay)
 
-def displayNetworkData(page, delay):
-  
-  #Get ip address
+def get_network_data():
   try:
     #Get address and port data
     addr = subprocess.check_output("ip add show dev eth0", shell=True, text=True)
-    
     #Get link stats
     link = subprocess.check_output("ip -s link show eth0", shell=True, text=True)
-        
+    
     #Split data into list elements
     addrData = addr.split()
     linkData = link.split()
 
-    #Get address data from list items
-    port = ("Port: " + addrData[1])
-    state = ("Network status: " + addrData[8])
-    ip = ("IP: " + addrData[18].strip("/24)"))
-    mac = ("MAC: " + addrData[14].replace(":",""))
+    port_val = addrData[1]
+    state_val = addrData[8]
+    # Handle cases where IP might be missing or different index
+    # The original code used hardcoded indices which is risky, keeping similar logic but being careful
+    try:
+       ip_val = addrData[18].strip("/24)")
+    except IndexError:
+       ip_val = "N/A"
+       
+    mac_val = addrData[14].replace(":","")
+    
+    mtu_val = linkData[4]
+    rx_val = linkData[26]
+    tx_val = linkData[39]
 
-    #Get link stats from list items
-    mtu = ("MTU: " + linkData[4])
-    rx = ("RX: " + linkData[26])
-    tx = ("TX: " + linkData[39])
+    shared_stats["network"] = {
+      "port": port_val,
+      "state": state_val,
+      "ip": ip_val,
+      "mac": mac_val,
+      "mtu": mtu_val,
+      "rx": rx_val,
+      "tx": tx_val
+    }
 
+    port = ("Port: " + port_val)
+    state = ("Network status: " + state_val)
+    ip = ("IP: " + ip_val)
+    mac = ("MAC: " + mac_val)
+
+    mtu = ("MTU: " + mtu_val)
+    rx = ("RX: " + rx_val)
+    tx = ("TX: " + tx_val)
+    
+    return port, state, ip, mac, mtu, rx, tx
+  except Exception as e:
+    print(f"Network error: {e}")
+    return None
+
+def displayNetworkData(page, delay):
+  
+  #Get ip address
+  data = get_network_data()
+  
+  if data:
+    port, state, ip, mac, mtu, rx, tx = data
     
     #Print Data
     if page ==1:
@@ -246,8 +407,7 @@ def displayNetworkData(page, delay):
       print (tx)
       lcd_string(tx,LCD_LINE_3,1)
 
-  except Exception as e:
-    print(e)
+  else:
     print("Network error")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
@@ -256,12 +416,8 @@ def displayNetworkData(page, delay):
     lcd_string("********************",LCD_LINE_4,2)
     
   time.sleep(delay)
-  
-  
-def displayGPSData(page, delay):
 
-  # Get output of gpspipe, output is native GPSD JSON sentences + NMEA messages
-  # -r = raw NMEA senteces, -x causes gpspipe to close after no. seconds
+def get_gps_data():
   try:
     output = subprocess.check_output("gpspipe -r -x 3", shell=True, text=True)
     
@@ -272,28 +428,68 @@ def displayGPSData(page, delay):
     pattern = "$GPGGA"
     gpgga = [x for x in gpsPipe if x.startswith(pattern)]
     
+    if not gpgga:
+       raise ValueError("No GPGGA message found")
+
     # pynmea2 can't process list, so pick first available item in list
     msg = pynmea2.parse(gpgga[0])
 
-    #Get data from $GPGGA message (number of satellites, lat, long, height)
-    satellites = ("Satellites: " + msg.num_sats)
-    latitude = ("Lat: " + msg.lat + msg.lat_dir)
-    longitude = ("Lon: " + msg.lon + msg.lon_dir)
-    altitude = ("Alt: " + str(msg.altitude) + msg.altitude_units)
+    sat_val = msg.num_sats
+    lat_val = msg.lat + msg.lat_dir
+    lon_val = msg.lon + msg.lon_dir
+    alt_val = str(msg.altitude) + msg.altitude_units
 
     # Get $GPGSA message for fix and dilution of precision data
     pattern = "$GPGSA"
     gpgsa = [x for x in gpsPipe if x.startswith(pattern)]
     
+    if not gpgsa:
+      raise ValueError("No GPGSA message found")
+
     # pynmea2 can't process list, so pick first available item in list
     dop = pynmea2.parse(gpgsa[0])
 
-    #Get data from $GPGSA message for fix status and DOP
+    fix_mode = dop.mode_fix_type
+    pdop_val = dop.pdop
+    hdop_val = dop.hdop
+    vdop_val = dop.vdop
+    
     readable_fix = ("No fix", "2D Fix", "3D Fix")
-    fix = ("Fix: " + readable_fix[int(dop.mode_fix_type) -1])
-    pdop = ("PDOP: " + dop.pdop)
-    hdop = ("HDOP: " + dop.hdop)
-    vdop = ("VDOP: " + dop.vdop)
+    fix_text = readable_fix[int(fix_mode) -1]
+
+    shared_stats["gps"] = {
+      "satellites": sat_val,
+      "latitude": lat_val,
+      "longitude": lon_val,
+      "altitude": alt_val,
+      "fix": fix_text,
+      "pdop": pdop_val,
+      "hdop": hdop_val,
+      "vdop": vdop_val
+    }
+
+    satellites = ("Satellites: " + sat_val)
+    latitude = ("Lat: " + lat_val)
+    longitude = ("Lon: " + lon_val)
+    altitude = ("Alt: " + alt_val)
+    
+    fix = ("Fix: " + fix_text)
+    pdop = ("PDOP: " + pdop_val)
+    hdop = ("HDOP: " + hdop_val)
+    vdop = ("VDOP: " + vdop_val)
+    
+    return satellites, latitude, longitude, altitude, fix, pdop, hdop, vdop
+    
+  except Exception as e:
+    print(f"GPS error: {e}")
+    return None
+
+def displayGPSData(page, delay):
+  
+  data = get_gps_data()
+
+  if data:
+    satellites, latitude, longitude, altitude, fix, pdop, hdop, vdop = data
 
     if page == 1:
       #Page 1
@@ -320,9 +516,8 @@ def displayGPSData(page, delay):
       lcd_string(vdop,LCD_LINE_4,1)
 
     time.sleep(delay)
- 
-  except Exception as e:
-    print(e)
+  
+  else:
     print("gpspipe error or no gps data")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
@@ -330,35 +525,50 @@ def displayGPSData(page, delay):
     lcd_string("*                  *",LCD_LINE_3,2)
     lcd_string("********************",LCD_LINE_4,2)
     time.sleep(delay)
+ 
+def get_chrony_data():
+  try:
+    output = subprocess.check_output("chronyc tracking", shell=True, text=True)
+    #Split chronyc output into element list
+    chronyResult = output.split()
+    
+    systemTime_val = (chronyResult[20] + " " + "s " + chronyResult[22])
+    lastOffset_val = (chronyResult[29] + " s")
+    rmsOffset_val = (chronyResult[34] + " s")
+    freq_val = (chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
+    resFreq_val = (chronyResult[44] + " " + chronyResult[45])
+    skew_val = (chronyResult[48] + " " + chronyResult[49])
+    rootDly_val = (chronyResult[53] + " sec")
+    rootDisp_val = (chronyResult[58] + " sec")
+    upInt_val = (chronyResult[63] + " sec")
+    lpStat_val = (chronyResult[68])
 
+    shared_stats["chrony"] = {
+      "system_time": systemTime_val,
+      "last_offset": lastOffset_val,
+      "rms_offset": rmsOffset_val,
+      "frequency": freq_val,
+      "residual_frequency": resFreq_val,
+      "skew": skew_val,
+      "root_delay": rootDly_val,
+      "root_dispersion": rootDisp_val,
+      "update_interval": upInt_val,
+      "leap_status": lpStat_val
+    }
+
+    return systemTime_val, lastOffset_val, rmsOffset_val, freq_val, resFreq_val, skew_val, rootDly_val, rootDisp_val, upInt_val, lpStat_val
+
+  except Exception as e:
+    print(f"Chrony error: {e}")
+    return None
 
 def displayChronyStats(page, delay):
   
   blank_display()
 
-  try:
-    output = subprocess.check_output("chronyc tracking", shell=True, text=True)
-    
-    #Split chronyc output into element list
-    chronyResult = output.split()
-    
-    systemTime = (chronyResult[20] + " " + "s " + chronyResult[22])
-    lastOffset = (chronyResult[29] + " s")
-    
-    rmsOffset = (chronyResult[34] + " s")
-    freq = (chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
-    
-    resFreq = (chronyResult[44] + " " + chronyResult[45])
-    skew = (chronyResult[48] + " " + chronyResult[49])
-
-    rootDly = (chronyResult[53] + " sec")
-    rootDisp = (chronyResult[58] + " sec")
-
-    upInt = (chronyResult[63] + " sec")
-    lpStat = (chronyResult[68])
-
-    
-
+  data = get_chrony_data()
+  if data:
+    systemTime, lastOffset, rmsOffset, freq, resFreq, skew, rootDly, rootDisp, upInt, lpStat = data
 
     #Output stats to console and LCD
     if page == 1:
@@ -422,10 +632,8 @@ def displayChronyStats(page, delay):
       lcd_string(lpStat,LCD_LINE_4,3)
 
     time.sleep(delay)
-
   
-  except Exception as e:
-    print(e)
+  else:
     print("chronyc error or no gps data")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
