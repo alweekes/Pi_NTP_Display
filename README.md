@@ -1,5 +1,9 @@
+v1.2
+Added live time and date display
+
 v1.1
 Added web page for display of stats.
+
 v1.0
 Rebuild of my GPS disciplned Raspberry Pi NTP server using DietPi as a lightweight minimal OS ideally suited for a Pi 1 Model B.
 Pi uses a USB GPS dongle,  modified to extract the PPS signal (fed into the pi on GPIO18) and ultimately fed to GPSD/chrony for high accuracy.
