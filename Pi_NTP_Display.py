@@ -432,6 +432,33 @@ def displayNetworkData(page, delay):
     
   time.sleep(delay)
 
+def format_gps_coord(val, dir, is_lat):
+  # Determine the degree part length based on lat/lon
+  # Lat: DDMM.MMMM -> 2 digits for degrees
+  # Lon: DDDMM.MMMM -> 3 digits for degrees
+  deg_len = 2 if is_lat else 3
+    
+  try:
+    # Check if val is a string or float, handle accordingly.
+    # pynmea2 usually provides these as strings or floats depending on the exact property accessed. 
+    # The user code was using `msg.lat` (string) + `msg.lat_dir` (string).
+    # We need to parse the raw string "DDMM.MMMM"
+        
+    # Ensure it's a string for slicing
+    val_str = str(val).strip()
+    if not val_str: return "N/A"
+        
+    degrees = val_str[:deg_len]
+    minutes = val_str[deg_len:]
+        
+    # Use chr(223) for degree symbol if supported, otherwise 'd' or ' '
+    degree_symbol = chr(223) 
+        
+    return f"{degrees}{degree_symbol}{minutes}'{dir}"
+  except Exception as e:
+    print(f"Error formatting: {e}")
+    return f"{val}{dir}"
+
 def get_gps_data():
   try:
     output = subprocess.check_output("gpspipe -r -x 3", shell=True, text=True)
@@ -450,8 +477,8 @@ def get_gps_data():
     msg = pynmea2.parse(gpgga[0])
 
     sat_val = msg.num_sats
-    lat_val = msg.lat + msg.lat_dir
-    lon_val = msg.lon + msg.lon_dir
+    lat_val = format_gps_coord(msg.lat, msg.lat_dir, True)
+    lon_val = format_gps_coord(msg.lon, msg.lon_dir, False)
     alt_val = str(msg.altitude) + msg.altitude_units
 
     # Get $GPGSA message for fix and dilution of precision data
