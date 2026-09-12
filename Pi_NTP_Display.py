@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #--------------------------------------------------------------------------------
 #
 # Pi NTP Server Stats + Clock Display
@@ -35,19 +35,14 @@
 # PPS signal for accurate timing GPIO Pin 18
 
 #import
-import os
 import pynmea2
 import RPi.GPIO as GPIO
 import time
 from datetime import datetime
 import subprocess
-from gps import *
-import re
 import threading
 import http.server
 import socketserver
-import json
-import logging
 
 # Shared dictionary to store statistics for the web page
 shared_stats = {
@@ -357,7 +352,7 @@ def get_network_data():
     # Handle cases where IP might be missing or different index
     # The original code used hardcoded indices which is risky, keeping similar logic but being careful
     try:
-       ip_val = addrData[18].strip("/24)")
+       ip_val = addrData[18].split("/")[0]
     except IndexError:
        ip_val = "N/A"
        
@@ -676,7 +671,7 @@ def displayChronyStats(page, delay):
     time.sleep(delay)
   
   else:
-    print("chronyc error or no gps data")
+    print("chronyc error or no data")
     blank_display()
     lcd_string("********************",LCD_LINE_1,2)
     lcd_string("*  chronyc error   *",LCD_LINE_2,2)
