@@ -89,6 +89,7 @@ class StatsHandler(http.server.BaseHTTPRequestHandler):
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Pi NTP Status</title>
     <meta http-equiv="refresh" content="5">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -427,28 +428,30 @@ def displayNetworkData(page, delay):
     
   time.sleep(delay)
 
-def format_gps_coord(val, dir, is_lat):
+def format_gps_coord(val, dir, is_lat, degree_symbol=chr(223)):
   # Determine the degree part length based on lat/lon
   # Lat: DDMM.MMMM -> 2 digits for degrees
   # Lon: DDDMM.MMMM -> 3 digits for degrees
   deg_len = 2 if is_lat else 3
-    
+
   try:
     # Check if val is a string or float, handle accordingly.
-    # pynmea2 usually provides these as strings or floats depending on the exact property accessed. 
+    # pynmea2 usually provides these as strings or floats depending on the exact property accessed.
     # The user code was using `msg.lat` (string) + `msg.lat_dir` (string).
     # We need to parse the raw string "DDMM.MMMM"
-        
+
     # Ensure it's a string for slicing
     val_str = str(val).strip()
     if not val_str: return "N/A"
-        
+
     degrees = val_str[:deg_len]
     minutes = val_str[deg_len:]
-        
-    # Use chr(223) for degree symbol if supported, otherwise 'd' or ' '
-    degree_symbol = chr(223) 
-        
+
+    # degree_symbol defaults to chr(223), the HD44780 ROM code for the
+    # degree glyph on the physical LCD. The web page passes the real
+    # Unicode degree sign (U+00B0) instead, since chr(223) is 'ß' in
+    # Unicode text and renders as garbage in a browser.
+
     return f"{degrees}{degree_symbol}{minutes}'{dir}"
   except Exception as e:
     print(f"Error formatting: {e}")
@@ -474,6 +477,9 @@ def get_gps_data():
     sat_val = msg.num_sats
     lat_val = format_gps_coord(msg.lat, msg.lat_dir, True)
     lon_val = format_gps_coord(msg.lon, msg.lon_dir, False)
+    # Web page uses the real Unicode degree sign; the LCD uses its own ROM glyph (chr(223))
+    lat_web = format_gps_coord(msg.lat, msg.lat_dir, True, degree_symbol="°")
+    lon_web = format_gps_coord(msg.lon, msg.lon_dir, False, degree_symbol="°")
     alt_val = str(msg.altitude) + msg.altitude_units
 
     # Get $GPGSA message for fix and dilution of precision data
@@ -496,8 +502,8 @@ def get_gps_data():
 
     shared_stats["gps"] = {
       "satellites": sat_val,
-      "latitude": lat_val,
-      "longitude": lon_val,
+      "latitude": lat_web,
+      "longitude": lon_web,
       "altitude": alt_val,
       "fix": fix_text,
       "pdop": pdop_val,
