@@ -43,6 +43,8 @@ import subprocess
 import threading
 import http.server
 import socketserver
+import json
+from collections import deque
 
 # Shared dictionary to store statistics for the web page
 shared_stats = {
@@ -52,6 +54,10 @@ shared_stats = {
     "gps": {},
     "chrony": {}
 }
+
+# Recent chrony last-offset samples as [epoch_ms, seconds], for the web page's history chart
+offset_history = deque(maxlen=150)
+history_lock = threading.Lock()
 
 # Define GPIO to LCD mapping
 LCD_RS = 7
@@ -75,106 +81,312 @@ LCD_LINE_4 = 0xD4 # LCD RAM address for the 4th line
 E_PULSE = 0.0005
 E_DELAY = 0.0005
 
+# Web page served at '/'. It is static: the browser pulls live values from /api/stats
+WEB_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi NTP Status</title>
+<style>
+  :root {
+    --bg: #0a0c0f; --panel: #111419; --line: #1e232b; --text: #e4e8ee; --muted: #6f7885;
+    --accent: #3ddc97; --warn: #f2b33d; --bad: #ff5f5f;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body { padding: 20px 16px 40px; max-width: 1100px; margin: 0 auto; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .brand { font-family: var(--mono); font-size: 13px; letter-spacing: .18em; color: var(--muted); text-transform: uppercase; }
+  .brand b { color: var(--text); font-weight: 600; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+          border: 1px solid var(--line); font-family: var(--mono); font-size: 12px; letter-spacing: .12em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.ok .dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 2s infinite; }
+  .pill.warn .dot { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+  .pill.bad .dot { background: var(--bad); box-shadow: 0 0 10px var(--bad); }
+  .pill.ok { color: var(--accent); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  h2 { margin: 0 0 14px; font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; margin-bottom: 16px; }
+  .clock { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: clamp(44px, 11vw, 104px);
+           line-height: 1; letter-spacing: -.02em; font-weight: 500; }
+  .clock .ms { color: var(--muted); font-size: .42em; margin-left: .1em; }
+  .sub { margin-top: 10px; font-family: var(--mono); font-size: 14px; color: var(--muted); }
+  .sub span + span::before { content: "·"; margin: 0 10px; color: var(--line); }
+  .offset { text-align: right; }
+  .offset .big { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: clamp(28px, 6vw, 44px); color: var(--accent); }
+  .offset .small { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  .spark { margin-bottom: 16px; }
+  .spark-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .spark-head .num { font-size: 12px; color: var(--muted); }
+  svg.chart { width: 100%; height: 110px; display: block; }
+  .zero { stroke: var(--line); stroke-dasharray: 3 4; }
+  .trace { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .area { fill: var(--accent); opacity: .08; }
+  .empty { fill: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .row:first-of-type { border-top: 0; }
+  .row .k { color: var(--muted); }
+  .row .v { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+  .stat { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .stat .n { font-family: var(--mono); font-size: 40px; line-height: 1; }
+  .badge { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; padding: 3px 8px; border-radius: 4px;
+           border: 1px solid currentColor; color: var(--muted); }
+  .badge.ok { color: var(--accent); } .badge.warn { color: var(--warn); } .badge.bad { color: var(--bad); }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0 14px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .6s ease; }
+
+  footer { margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px;
+           font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; }
+    .hero { grid-template-columns: 1fr; }
+    .offset { text-align: left; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand"><b>Pi</b>&nbsp;/&nbsp;NTP&nbsp;Server</div>
+    <div id="status" class="pill"><span class="dot"></span><span id="status-text">CONNECTING</span></div>
+  </header>
+
+  <section class="hero">
+    <div>
+      <div class="clock" id="clock">--:--:--<span class="ms">.---</span></div>
+      <div class="sub"><span id="date">----</span><span id="utc">UTC --:--:--</span></div>
+    </div>
+    <div class="offset">
+      <div class="label">Last offset</div>
+      <div class="big" id="offset">--</div>
+      <div class="small">RMS <span id="rms">--</span></div>
+    </div>
+  </section>
+
+  <section class="panel spark">
+    <div class="spark-head">
+      <h2 style="margin:0">Offset history</h2>
+      <span class="num" id="spark-range"></span>
+    </div>
+    <svg class="chart" id="chart" viewBox="0 0 600 110" preserveAspectRatio="none"></svg>
+  </section>
+
+  <section class="grid">
+    <div class="panel">
+      <h2>Chrony</h2>
+      <div class="row"><span class="k">System time</span><span class="v" id="c-system">--</span></div>
+      <div class="row"><span class="k">Frequency</span><span class="v" id="c-freq">--</span></div>
+      <div class="row"><span class="k">Residual freq</span><span class="v" id="c-resfreq">--</span></div>
+      <div class="row"><span class="k">Skew</span><span class="v" id="c-skew">--</span></div>
+      <div class="row"><span class="k">Root delay</span><span class="v" id="c-rdelay">--</span></div>
+      <div class="row"><span class="k">Root dispersion</span><span class="v" id="c-rdisp">--</span></div>
+      <div class="row"><span class="k">Update interval</span><span class="v" id="c-interval">--</span></div>
+      <div class="row"><span class="k">Leap status</span><span class="v" id="c-leap">--</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>GPS</h2>
+      <div class="stat"><span class="n" id="g-sats">--</span><span class="label">satellites</span>
+        <span class="badge" id="g-fix">NO DATA</span></div>
+      <div class="row"><span class="k">Latitude</span><span class="v" id="g-lat">--</span></div>
+      <div class="row"><span class="k">Longitude</span><span class="v" id="g-lon">--</span></div>
+      <div class="row"><span class="k">Altitude</span><span class="v" id="g-alt">--</span></div>
+      <div class="row"><span class="k">PDOP / HDOP / VDOP</span><span class="v" id="g-dop">--</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>System</h2>
+      <div class="row" style="border:0;padding-bottom:0"><span class="k">Memory</span><span class="v" id="m-used">--</span></div>
+      <div class="bar"><i id="m-bar"></i></div>
+      <div class="row"><span class="k">IP</span><span class="v" id="n-ip">--</span></div>
+      <div class="row"><span class="k">Link</span><span class="v" id="n-state">--</span></div>
+      <div class="row"><span class="k">MAC</span><span class="v" id="n-mac">--</span></div>
+      <div class="row"><span class="k">RX / TX</span><span class="v" id="n-rxtx">--</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <span id="updated">Stats: --</span>
+    <span id="drift">This device vs server: --</span>
+  </footer>
+
+<script>
+  var POLL_MS = 2000;
+  var clockOffset = 0;   // server time minus browser time, in ms
+  var bestRtt = Infinity;
+  var lastOk = 0;
+
+  function $(id) { return document.getElementById(id); }
+  function set(id, v) { $(id).textContent = (v === undefined || v === null || v === "") ? "--" : v; }
+  function pad(n, w) { n = String(n); while (n.length < (w || 2)) n = "0" + n; return n; }
+
+  // Format a value in seconds with an SI unit suited to its size
+  function fmtSec(s, signed) {
+    if (s === null || isNaN(s)) return "--";
+    var a = Math.abs(s), v, u;
+    if (a === 0) { v = 0; u = "s"; }
+    else if (a < 1e-6) { v = s * 1e9; u = "ns"; }
+    else if (a < 1e-3) { v = s * 1e6; u = "µs"; }
+    else if (a < 1) { v = s * 1e3; u = "ms"; }
+    else { v = s; u = "s"; }
+    var t = Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+    return (signed && s > 0 ? "+" : "") + t + " " + u;
+  }
+  function fmtBytes(b) {
+    b = Number(b); if (isNaN(b)) return "--";
+    var u = ["B", "KB", "MB", "GB", "TB"], i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return b.toFixed(i ? 1 : 0) + " " + u[i];
+  }
+
+  function tick() {
+    var now = new Date(Date.now() + clockOffset);
+    $("clock").innerHTML = pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds()) +
+      '<span class="ms">.' + pad(now.getMilliseconds(), 3) + "</span>";
+    $("date").textContent = now.toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" });
+    $("utc").textContent = "UTC " + pad(now.getUTCHours()) + ":" + pad(now.getUTCMinutes()) + ":" + pad(now.getUTCSeconds());
+    requestAnimationFrame(tick);
+  }
+
+  function setStatus(level, text) {
+    $("status").className = "pill " + level;
+    $("status-text").textContent = text;
+  }
+
+  function drawChart(hist) {
+    var svg = $("chart"), W = 600, H = 110, mid = H / 2;
+    if (!hist || hist.length < 2) {
+      svg.innerHTML = '<line class="zero" x1="0" y1="' + mid + '" x2="' + W + '" y2="' + mid + '"/>' +
+        '<text class="empty" x="8" y="' + (mid - 8) + '">collecting samples…</text>';
+      set("spark-range", "");
+      return;
+    }
+    var t0 = hist[0][0], t1 = hist[hist.length - 1][0], span = Math.max(t1 - t0, 1);
+    var peak = 0;
+    hist.forEach(function (p) { peak = Math.max(peak, Math.abs(p[1])); });
+    peak = peak || 1e-9;
+    var pts = hist.map(function (p) {
+      return ((p[0] - t0) / span * W).toFixed(1) + "," + (mid - p[1] / peak * (mid - 6)).toFixed(1);
+    });
+    svg.innerHTML =
+      '<line class="zero" x1="0" y1="' + mid + '" x2="' + W + '" y2="' + mid + '"/>' +
+      '<polygon class="area" points="0,' + mid + " " + pts.join(" ") + " " + W + "," + mid + '"/>' +
+      '<polyline class="trace" points="' + pts.join(" ") + '"/>';
+    var mins = Math.round(span / 60000);
+    set("spark-range", "±" + fmtSec(peak) + " · last " + (mins < 1 ? "<1" : mins) + " min");
+  }
+
+  function render(d) {
+    var c = d.chrony || {}, g = d.gps || {}, m = d.memory || {}, n = d.network || {};
+
+    var off = parseFloat(c.last_offset), rms = parseFloat(c.rms_offset);
+    set("offset", fmtSec(off, true));
+    set("rms", fmtSec(rms));
+
+    var sys = parseFloat(c.system_time);
+    set("c-system", isNaN(sys) ? c.system_time : fmtSec(sys) + " " + (c.system_time.split(" ").pop() || ""));
+    set("c-freq", c.frequency);
+    set("c-resfreq", c.residual_frequency);
+    set("c-skew", c.skew);
+    set("c-rdelay", fmtSec(parseFloat(c.root_delay)));
+    set("c-rdisp", fmtSec(parseFloat(c.root_dispersion)));
+    set("c-interval", c.update_interval);
+    set("c-leap", c.leap_status);
+
+    set("g-sats", g.satellites ? parseInt(g.satellites, 10) : "--");
+    var fix = g.fix || "NO DATA";
+    $("g-fix").textContent = fix.toUpperCase();
+    $("g-fix").className = "badge " + (fix === "3D Fix" ? "ok" : fix === "2D Fix" ? "warn" : "bad");
+    set("g-lat", g.latitude);
+    set("g-lon", g.longitude);
+    set("g-alt", g.altitude);
+    set("g-dop", g.pdop ? [g.pdop, g.hdop, g.vdop].join(" / ") : null);
+
+    var total = parseInt(m.total, 10), used = parseInt(m.used, 10);
+    if (total && !isNaN(used)) {
+      // `free` reports KiB
+      set("m-used", fmtBytes(used * 1024) + " / " + fmtBytes(total * 1024));
+      $("m-bar").style.width = (used / total * 100).toFixed(1) + "%";
+    }
+    set("n-ip", n.ip);
+    set("n-state", n.state);
+    set("n-mac", n.mac ? n.mac.replace(/(..)(?!$)/g, "$1:") : null);
+    set("n-rxtx", n.rx ? fmtBytes(n.rx) + " / " + fmtBytes(n.tx) : null);
+
+    drawChart(d.offset_history);
+    set("updated", "Stats: " + (d.last_updated || "--"));
+
+    // Overall health: chrony must be synchronised; GPS fix and small offset make it fully locked
+    if (!c.leap_status || c.leap_status !== "Normal") setStatus("bad", "NO SYNC");
+    else if (fix !== "3D Fix" || Math.abs(off) > 1e-3) setStatus("warn", "DEGRADED");
+    else setStatus("ok", "LOCKED");
+  }
+
+  function poll() {
+    var sent = Date.now();
+    fetch("/api/stats", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) {
+        var recv = Date.now(), rtt = recv - sent;
+        // Keep the estimate from the fastest round trip (least network jitter), refreshed occasionally
+        if (rtt <= bestRtt || recv - lastOk > 60000) {
+          bestRtt = rtt;
+          clockOffset = d.server_time_ms - (sent + recv) / 2;
+          set("drift", "This device vs server: " + (clockOffset >= 0 ? "-" : "+") + Math.abs(Math.round(clockOffset)) + " ms (±" + Math.ceil(rtt / 2) + ")");
+        }
+        lastOk = recv;
+        render(d);
+      })
+      .catch(function () {
+        if (Date.now() - lastOk > POLL_MS * 3) setStatus("bad", "LINK LOST");
+      })
+      .then(function () { setTimeout(poll, POLL_MS); });
+  }
+
+  drawChart([]);
+  requestAnimationFrame(tick);
+  poll();
+</script>
+</body>
+</html>
+"""
+
 class StatsHandler(http.server.BaseHTTPRequestHandler):
   def do_GET(self):
     if self.path == '/':
-      self.send_response(200)
-      self.send_header('Content-type', 'text/html')
-      self.end_headers()
-      # Get current time for JS clock initialization
-      js_timestamp = int(time.time() * 1000)
+      self.send_body(WEB_PAGE.encode(), 'text/html; charset=utf-8')
+    elif self.path == '/api/stats':
+      with history_lock:
+        history = list(offset_history)
+      payload = dict(shared_stats, offset_history=history, server_time_ms=int(time.time() * 1000))
+      self.send_body(json.dumps(payload).encode(), 'application/json')
+    else:
+      self.send_error(404)
 
-      # Simple HTML Template
-      html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Pi NTP Status</title>
-    <meta http-equiv="refresh" content="5">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: monospace; background: #222; color: #0f0; padding: 20px; max-width: 800px; margin: auto; }
-        .box { border: 1px solid #444; padding: 15px; margin-bottom: 20px; border-radius: 5px; background: #111; }
-        h1 { text-align: center; color: #fff; }
-        h2 { margin-top: 0; color: #ddd; border-bottom: 1px solid #444; padding-bottom: 5px; }
-        .item { margin: 5px 0; display: flex; justify-content: space-between; }
-        .label { color: #888; }
-        .value { color: #0f0; font-weight: bold; }
-        .error { color: #f00; }
-        #clock { text-align: center; font-size: 1.5em; color: #fff; margin-bottom: 10px; }
-    </style>
-    <script>
-        var serverTime = new Date(%d);
-        function updateClock() {
-            serverTime.setSeconds(serverTime.getSeconds() + 1);
-            document.getElementById('clock').innerText = serverTime.toLocaleTimeString() + " " + serverTime.toLocaleDateString();
-        }
-        setInterval(updateClock, 1000);
-        window.onload = function() {
-            document.getElementById('clock').innerText = serverTime.toLocaleTimeString() + " " + serverTime.toLocaleDateString();
-        }
-    </script>
-</head>
-<body>
-    <h1>Pi NTP Server Status</h1>
-    <div id="clock">Loading...</div>
-    <div style="text-align:center; color:#888; margin-bottom: 20px;">Last Stats Update: %s</div>
-""" % (js_timestamp, shared_stats["last_updated"])
+  def send_body(self, body, content_type):
+    self.send_response(200)
+    self.send_header('Content-type', content_type)
+    self.send_header('Content-Length', str(len(body)))
+    self.send_header('Cache-Control', 'no-store')
+    self.end_headers()
+    self.wfile.write(body)
 
-      # Memory Section
-      mem = shared_stats.get("memory", {})
-      html += """
-    <div class="box">
-        <h2>Memory</h2>
-        <div class="item"><span class="label">Total</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Used</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Free</span><span class="value">%s</span></div>
-    </div>
-""" % (mem.get("total", "N/A"), mem.get("used", "N/A"), mem.get("free", "N/A"))
-
-      # Network Section
-      net = shared_stats.get("network", {})
-      html += """
-    <div class="box">
-        <h2>Network</h2>
-        <div class="item"><span class="label">IP</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">State</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">MAC</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">RX</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">TX</span><span class="value">%s</span></div>
-    </div>
-""" % (net.get("ip", "N/A"), net.get("state", "N/A"), net.get("mac", "N/A"), net.get("rx", "N/A"), net.get("tx", "N/A"))
-
-      # GPS Section
-      gps = shared_stats.get("gps", {})
-      html += """
-    <div class="box">
-        <h2>GPS</h2>
-        <div class="item"><span class="label">Fix</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Satellites</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Lat</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Lon</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Alt</span><span class="value">%s</span></div>
-    </div>
-""" % (gps.get("fix", "N/A"), gps.get("satellites", "N/A"), gps.get("latitude", "N/A"), gps.get("longitude", "N/A"), gps.get("altitude", "N/A"))
-
-      # Chrony Section
-      chrony = shared_stats.get("chrony", {})
-      html += """
-    <div class="box">
-        <h2>Chrony</h2>
-        <div class="item"><span class="label">System Time</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Last Offset</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">RMS Offset</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Frequency</span><span class="value">%s</span></div>
-        <div class="item"><span class="label">Root Delay</span><span class="value">%s</span></div>
-    </div>
-</body>
-</html>
-""" % (chrony.get("system_time", "N/A"), chrony.get("last_offset", "N/A"), chrony.get("rms_offset", "N/A"), chrony.get("frequency", "N/A"), chrony.get("root_delay", "N/A"))
-
-      self.wfile.write(html.encode())
+  def log_message(self, format, *args):
+    # The page polls every 2s; don't flood the console with access logs
+    pass
 
 def run_web_server():
   PORT = 8080
@@ -585,6 +797,9 @@ def get_chrony_data():
     rootDisp_val = (chronyResult[58] + " sec")
     upInt_val = (chronyResult[63] + " sec")
     lpStat_val = (chronyResult[68])
+
+    with history_lock:
+      offset_history.append([int(time.time() * 1000), float(chronyResult[29])])
 
     shared_stats["chrony"] = {
       "system_time": systemTime_val,
