@@ -147,11 +147,25 @@ WEB_PAGE = r"""<!DOCTYPE html>
   .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0 14px; }
   .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .6s ease; }
 
+  /* Explanatory tooltips: hover on desktop, tap (focus) on touch screens */
+  [data-tip] { position: relative; cursor: help; text-decoration: underline dotted var(--muted); text-underline-offset: 3px; outline: none; }
+  [data-tip]::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 8px); z-index: 10;
+    width: max-content; max-width: min(280px, 80vw); padding: 10px 12px; border-radius: 6px;
+    background: #1a1f27; border: 1px solid #2c333d; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    color: var(--text); font-family: var(--sans); font-size: 12px; line-height: 1.45; letter-spacing: normal;
+    text-transform: none; text-align: left; font-weight: 400; white-space: normal;
+    opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .15s, transform .15s, visibility .15s; }
+  [data-tip]:hover::after, [data-tip]:focus::after { opacity: 1; visibility: visible; transform: none; }
+  [data-tip]:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .tip-right::after { left: auto; right: 0; }
+  .offset .label[data-tip] { display: inline-block; }
+
   footer { margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px;
            font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
   @media (max-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 600px) {
+    .tip-right::after { left: 0; right: auto; }
     .grid { grid-template-columns: 1fr; }
     .hero { grid-template-columns: 1fr; }
     .offset { text-align: left; }
@@ -170,9 +184,9 @@ WEB_PAGE = r"""<!DOCTYPE html>
       <div class="sub"><span id="date">----</span><span id="utc">UTC --:--:--</span></div>
     </div>
     <div class="offset">
-      <div class="label">Last offset</div>
+      <div class="label tip-right" tabindex="0" data-tip="How far the system clock was from true time at the last update, just before chrony corrected it. Positive means the clock was fast. Closer to zero is better.">Last offset</div>
       <div class="big" id="offset">--</div>
-      <div class="small">RMS <span id="rms">--</span></div>
+      <div class="small"><span class="tip-right" tabindex="0" data-tip="Root-mean-square of recent offsets: a long-term measure of how accurately the clock is being held. Lower is better.">RMS</span> <span id="rms">--</span></div>
     </div>
   </section>
 
@@ -187,14 +201,14 @@ WEB_PAGE = r"""<!DOCTYPE html>
   <section class="grid">
     <div class="panel">
       <h2>Chrony</h2>
-      <div class="row"><span class="k">System time</span><span class="v" id="c-system">--</span></div>
-      <div class="row"><span class="k">Frequency</span><span class="v" id="c-freq">--</span></div>
-      <div class="row"><span class="k">Residual freq</span><span class="v" id="c-resfreq">--</span></div>
-      <div class="row"><span class="k">Skew</span><span class="v" id="c-skew">--</span></div>
-      <div class="row"><span class="k">Root delay</span><span class="v" id="c-rdelay">--</span></div>
-      <div class="row"><span class="k">Root dispersion</span><span class="v" id="c-rdisp">--</span></div>
-      <div class="row"><span class="k">Update interval</span><span class="v" id="c-interval">--</span></div>
-      <div class="row"><span class="k">Leap status</span><span class="v" id="c-leap">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="How far the system clock currently is from chrony's best estimate of true time. Chrony slews the clock gradually rather than jumping it, so this shrinks over time. “Fast” means the clock is ahead.">System time</span><span class="v" id="c-system">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="How fast or slow the Pi's crystal would run without correction, in parts per million. Chrony compensates for this continuously. 1 ppm is about 86 ms per day.">Frequency</span><span class="v" id="c-freq">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="The difference between the frequency the reference source suggests and the one chrony is using. Near zero means chrony's frequency estimate is accurate.">Residual freq</span><span class="v" id="c-resfreq">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="The estimated error bound on the frequency value. Smaller means chrony is more confident in its frequency estimate.">Skew</span><span class="v" id="c-skew">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="Total network round-trip delay to the stratum-1 reference at the top of the chain. With the GPS/PPS source attached directly, this should be close to zero.">Root delay</span><span class="v" id="c-rdelay">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="Accumulated error estimate back to the stratum-1 reference. The worst-case clock error is roughly root dispersion + half the root delay.">Root dispersion</span><span class="v" id="c-rdisp">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="Time between the last two clock updates from the reference source.">Update interval</span><span class="v" id="c-interval">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="Normal when synchronised. Shows Insert/Delete second when a leap second is scheduled, or Not synchronised when chrony has no usable source.">Leap status</span><span class="v" id="c-leap">--</span></div>
     </div>
 
     <div class="panel">
@@ -304,7 +318,8 @@ WEB_PAGE = r"""<!DOCTYPE html>
     set("c-rdelay", fmtSec(parseFloat(c.root_delay)));
     set("c-rdisp", fmtSec(parseFloat(c.root_dispersion)));
     set("c-interval", c.update_interval);
-    set("c-leap", c.leap_status);
+    var leap = { Not: "Not synchronised", Insert: "Insert second", Delete: "Delete second" }[c.leap_status] || c.leap_status;
+    set("c-leap", leap);
 
     set("g-sats", g.satellites ? parseInt(g.satellites, 10) : "--");
     var fix = g.fix || "NO DATA";
@@ -330,7 +345,7 @@ WEB_PAGE = r"""<!DOCTYPE html>
     set("updated", "Stats: " + (d.last_updated || "--"));
 
     // Overall health: chrony must be synchronised; GPS fix and small offset make it fully locked
-    if (!c.leap_status || c.leap_status !== "Normal") setStatus("bad", "NO SYNC");
+    if (!c.leap_status || c.leap_status === "Not") setStatus("bad", "NO SYNC");
     else if (fix !== "3D Fix" || Math.abs(off) > 1e-3) setStatus("warn", "DEGRADED");
     else setStatus("ok", "LOCKED");
   }
