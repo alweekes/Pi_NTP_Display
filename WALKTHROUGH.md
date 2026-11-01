@@ -13,38 +13,38 @@ Both read from the same shared data, so the LCD and the web page always show the
 
 ## Data collection
 
-Each stats area has a `get_*` function that runs a system command, parses its output, stores the result in `shared_stats`, and returns strings formatted for the LCD:
+Stats are collected by a **background thread** (`stats_collector()`) running on independent intervals, so the LCD loop and web server never block on subprocess calls:
 
-| Function | Source | `shared_stats` key |
-|---|---|---|
-| `get_network_data()` | `ip add show dev eth0`, `ip -s link show eth0` | `network` |
-| `get_mem_data()` | `free` | `memory` |
-| `get_gps_data()` | `gpspipe -r -x 3` (GPGGA and GPGSA sentences, parsed with `pynmea2`) | `gps` |
-| `get_chrony_data()` | `chronyc tracking` | `chrony` |
+| Function | Source | `shared_stats` key | Interval |
+|---|---|---|---|
+| `get_network_data()` | `ip add show dev eth0`, `ip -s link show eth0` | `network` | 10 s |
+| `get_mem_data()` | `free` | `memory` | 10 s |
+| `get_gps_data()` | `gpspipe -r -x 3` (GPGGA and GPGSA, parsed with `pynmea2`) | `gps` | 5 s |
+| `get_chrony_data()` | `chronyc tracking` | `chrony` | 2 s |
+
+The background thread updates `shared_stats` (a plain dict) and `shared_stats["last_updated"]` on each cycle. All subprocess calls use argument lists (no `shell=True`) to avoid the shell-spawn overhead on the Pi 1 Model B.
+
+The LCD display functions (`displayMemData`, `displayNetworkData`, `displayGPSData`, `displayChronyStats`) now **read from `shared_stats`** instead of calling the `get_*` functions directly, so they return instantly.
 
 `displayTime()` also writes `shared_stats["last_updated"]` every second while the clock page is showing.
 
-Stats are only refreshed when the LCD reaches the matching `display*` page; there is no separate polling loop. A full LCD cycle takes around two minutes with the default timings in `main()`.
-
-Parsing relies on fixed word positions in each command's output (e.g. `chronyResult[29]` for the last offset). If an OS or chrony update changes the output format, the affected fields will be wrong or missing and an error is printed to the console.
-
 ### Offset history
 
-`get_chrony_data()` also appends `[epoch_ms, last_offset_seconds]` to `offset_history`, a `deque(maxlen=150)`. Because the web thread reads it while the LCD thread writes it, both sides hold `history_lock`; the web handler copies it to a list under the lock before serialising.
+`get_chrony_data()` also appends `[epoch_ms, last_offset_seconds]` to `offset_history`, a `deque(maxlen=150)`. Because the web thread reads it while the collector thread writes it, both sides hold `history_lock`; the web handler copies it to a list under the lock before serialising.
 
 ## Web server
 
-Built on the standard library only (`http.server`, `socketserver`, `json`, `threading`). `run_web_server()` starts a `TCPServer` with `StatsHandler`, launched from `main()` in a daemon thread so it never blocks the LCD loop.
+Built on the standard library only (`http.server`, `socketserver`, `json`, `threading`, `hashlib`). `run_web_server()` starts a **`ThreadingTCPServer`** (with `ThreadingMixIn` and `daemon_threads=True`) with `StatsHandler`, launched from `main()` in a daemon thread so it never blocks the LCD loop. Threading allows concurrent `/api/stats` requests without queueing behind slow requests.
 
 `StatsHandler` routes:
 
 | Path | Response |
 |---|---|
-| `/` | The page (`WEB_PAGE`, a static HTML string) |
-| `/api/stats` | `shared_stats` plus `offset_history` and `server_time_ms`, as JSON |
+| `/` | The page (`WEB_PAGE`, a static HTML string) with **ETag** and `Cache-Control: public, max-age=60`. Returns `304 Not Modified` if `If-None-Match` matches. |
+| `/api/stats` | `shared_stats` plus `offset_history` and `server_time_ms`, as JSON (no caching) |
 | anything else | 404 |
 
-Responses are sent with `Cache-Control: no-store`. Per-request access logging is switched off (`log_message` is overridden) because the page polls every 2 seconds.
+Per-request access logging is switched off (`log_message` is overridden) because the page polls every 2 seconds.
 
 ## The web page
 

@@ -53,7 +53,7 @@ The page is a single self-contained HTML file served by the script, with no exte
 - **Chrony, GPS and System panels**. Hover (or tap on a phone) any chrony label for a plain-English explanation of what it means.
 - **Device vs server** in the footer: how far the clock of the device you're viewing from is from the Pi.
 
-The page polls every 2 seconds and updates in place without reloading. Note that stats are only re-read from `chronyc`/`gpspipe` as the LCD cycles through the relevant pages, so the history chart gains a few points per LCD cycle.
+The page polls every 2 seconds and updates in place without reloading. Stats are collected by a background thread on independent intervals (chrony: 2s, GPS: 5s, network/memory: 10s) so the web API always returns fresh data instantly without blocking.
 
 ### JSON API
 
@@ -64,18 +64,23 @@ The page polls every 2 seconds and updates in place without reloading. Note that
   "last_updated": "2026-09-26 14:02:11",
   "memory":  { "total": "...", "used": "...", "free": "..." },
   "network": { "ip": "...", "state": "...", "mac": "...", "rx": "...", "tx": "...", ... },
-  "gps":     { "fix": "3D Fix", "satellites": "09", "latitude": "...", ... },
+  "gps":     { "fix": "3D Fix", "satellites": "09", "latitude": "...", "longitude": "...", "latitude_decimal": 51.5074, "longitude_decimal": -0.1278, ... },
   "chrony":  { "last_offset": "+0.000000213 s", "rms_offset": "...", "leap_status": "Normal", ... },
   "offset_history": [[1790000000000, 2.13e-07], ...],
   "server_time_ms": 1790000000123
 }
 ```
 
-Values are passed through as reported by the underlying tools (memory in KiB, network counters in bytes). `offset_history` entries are `[epoch milliseconds, offset in seconds]`.
+Values are passed through as reported by the underlying tools (memory in KiB, network counters in bytes). `offset_history` entries are `[epoch milliseconds, offset in seconds]`. GPS includes both DMS (`latitude`/`longitude`) and decimal degrees (`latitude_decimal`/`longitude_decimal`) for easy copy/paste into mapping tools.
 
 See [WALKTHROUGH.md](WALKTHROUGH.md) for how the code is structured.
 
 ## Changelog
+
+**v1.4**
+- **Performance**: Background stats collector thread (no more blocking subprocess calls in main loop); removed `shell=True` from all subprocess calls; web server uses `ThreadingTCPServer` for concurrent requests; static HTML served with ETag/conditional requests (304 Not Modified).
+- **GPS**: Added `latitude_decimal` and `longitude_decimal` to JSON API and web page (6 decimal places).
+- **Caching**: Static HTML page cached by browsers (ETag + `Cache-Control: public, max-age=60`).
 
 **v1.3**
 - Redesigned web page as a live "instrument panel" that updates in place instead of reloading every 5 seconds.
