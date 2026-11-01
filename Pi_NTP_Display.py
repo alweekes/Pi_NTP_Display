@@ -223,6 +223,8 @@ WEB_PAGE = r"""<!DOCTYPE html>
         <span class="badge" id="g-fix">NO DATA</span></div>
       <div class="row"><span class="k">Latitude</span><span class="v" id="g-lat">--</span></div>
       <div class="row"><span class="k">Longitude</span><span class="v" id="g-lon">--</span></div>
+      <div class="row"><span class="k">Lat (decimal)</span><span class="v" id="g-lat-dec">--</span></div>
+      <div class="row"><span class="k">Lon (decimal)</span><span class="v" id="g-lon-dec">--</span></div>
       <div class="row"><span class="k">Altitude</span><span class="v" id="g-alt">--</span></div>
       <div class="row"><span class="k">PDOP / HDOP / VDOP</span><span class="v" id="g-dop">--</span></div>
     </div>
@@ -333,6 +335,8 @@ WEB_PAGE = r"""<!DOCTYPE html>
     $("g-fix").className = "badge " + (fix === "3D Fix" ? "ok" : fix === "2D Fix" ? "warn" : "bad");
     set("g-lat", g.latitude);
     set("g-lon", g.longitude);
+    set("g-lat-dec", g.latitude_decimal !== undefined && g.latitude_decimal !== null ? g.latitude_decimal.toFixed(6) : "--");
+    set("g-lon-dec", g.longitude_decimal !== undefined && g.longitude_decimal !== null ? g.longitude_decimal.toFixed(6) : "--");
     set("g-alt", g.altitude);
     set("g-dop", g.pdop ? [g.pdop, g.hdop, g.vdop].join(" / ") : null);
 
@@ -742,6 +746,25 @@ def format_gps_coord(val, dir, is_lat, degree_symbol=chr(223)):
     print(f"Error formatting: {e}")
     return f"{val}{dir}"
 
+
+def nmea_to_decimal(val, dir, is_lat):
+  """Convert NMEA DDMM.MMMM format to decimal degrees."""
+  try:
+    val_str = str(val).strip()
+    if not val_str:
+      return None
+    deg_len = 2 if is_lat else 3
+    degrees = float(val_str[:deg_len])
+    minutes = float(val_str[deg_len:])
+    decimal = degrees + minutes / 60.0
+    if dir in ('S', 'W'):
+      decimal = -decimal
+    return decimal
+  except Exception as e:
+    print(f"Error converting to decimal: {e}")
+    return None
+
+
 def get_gps_data():
   try:
     output = subprocess.check_output(["gpspipe", "-r", "-x", "3"], text=True)
@@ -765,6 +788,9 @@ def get_gps_data():
     # Web page uses the real Unicode degree sign; the LCD uses its own ROM glyph (chr(223))
     lat_web = format_gps_coord(msg.lat, msg.lat_dir, True, degree_symbol="°")
     lon_web = format_gps_coord(msg.lon, msg.lon_dir, False, degree_symbol="°")
+    # Decimal degrees for easy copy/paste into maps
+    lat_decimal = nmea_to_decimal(msg.lat, msg.lat_dir, True)
+    lon_decimal = nmea_to_decimal(msg.lon, msg.lon_dir, False)
     alt_val = str(msg.altitude) + msg.altitude_units
 
     # Get $GPGSA message for fix and dilution of precision data
@@ -789,6 +815,8 @@ def get_gps_data():
       "satellites": sat_val,
       "latitude": lat_web,
       "longitude": lon_web,
+      "latitude_decimal": lat_decimal,
+      "longitude_decimal": lon_decimal,
       "altitude": alt_val,
       "fix": fix_text,
       "pdop": pdop_val,
