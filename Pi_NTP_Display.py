@@ -45,6 +45,7 @@ import http.server
 import socketserver
 import json
 from collections import deque
+import hashlib
 
 # Shared dictionary to store statistics for the web page
 shared_stats = {
@@ -58,6 +59,11 @@ shared_stats = {
 # Recent chrony last-offset samples as [epoch_ms, seconds], for the web page's history chart
 offset_history = deque(maxlen=150)
 history_lock = threading.Lock()
+
+# Thread-safe cache for stats with timestamps
+stats_cache = {}
+stats_cache_lock = threading.Lock()
+CACHE_TTL = 2.0  # seconds
 
 # Define GPIO to LCD mapping
 LCD_RS = 7
@@ -379,15 +385,38 @@ WEB_PAGE = r"""<!DOCTYPE html>
 </html>
 """
 
+# Pre-computed ETag for the static HTML page
+WEB_PAGE_ETAG = hashlib.md5(WEB_PAGE.encode()).hexdigest()
+
 class StatsHandler(http.server.BaseHTTPRequestHandler):
   def do_GET(self):
     if self.path == '/':
-      self.send_body(WEB_PAGE.encode(), 'text/html; charset=utf-8')
+      # Check If-None-Match header for conditional request
+      if_none_match = self.headers.get('If-None-Match')
+      if if_none_match == WEB_PAGE_ETAG:
+        self.send_response(304)
+        self.end_headers()
+        return
+      
+      self.send_response(200)
+      self.send_header('Content-type', 'text/html; charset=utf-8')
+      self.send_header('Content-Length', str(len(WEB_PAGE.encode())))
+      self.send_header('ETag', WEB_PAGE_ETAG)
+      self.send_header('Cache-Control', 'public, max-age=60')
+      self.end_headers()
+      self.wfile.write(WEB_PAGE.encode())
     elif self.path == '/api/stats':
+      # Serve fresh data from shared_stats (updated by background collector)
       with history_lock:
         history = list(offset_history)
       payload = dict(shared_stats, offset_history=history, server_time_ms=int(time.time() * 1000))
-      self.send_body(json.dumps(payload).encode(), 'application/json')
+      body = json.dumps(payload).encode()
+      self.send_response(200)
+      self.send_header('Content-type', 'application/json')
+      self.send_header('Content-Length', str(len(body)))
+      self.send_header('Cache-Control', 'no-store')
+      self.end_headers()
+      self.wfile.write(body)
     else:
       self.send_error(404)
 
@@ -408,7 +437,12 @@ def run_web_server():
   Handler = StatsHandler
   # Allow address reuse to avoid 'Address already in use' errors
   socketserver.TCPServer.allow_reuse_address = True
-  with socketserver.TCPServer(("", PORT), Handler) as httpd:
+  # Use ThreadingTCPServer to handle multiple concurrent requests
+  class ThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+  
+  with ThreadingHTTPServer(("", PORT), Handler) as httpd:
     print(f"Serving at port {PORT}")
     httpd.serve_forever()
 
@@ -422,6 +456,14 @@ def main():
     print("Web server started on port 8080")
   except Exception as e:
     print(f"Failed to start web server: {e}")
+
+  # Start background stats collector thread
+  try:
+    collector_thread = threading.Thread(target=stats_collector, daemon=True)
+    collector_thread.start()
+    print("Stats collector started")
+  except Exception as e:
+    print(f"Failed to start stats collector: {e}")
 
   GPIO.setmode(GPIO.BCM)       # Use BCM GPIO numbers
   GPIO.setup(LCD_E, GPIO.OUT)  # E
@@ -521,7 +563,7 @@ def displayTime(cycles):
 
 def get_mem_data():
   try:
-    mem = subprocess.check_output("free", shell=True, text=True)
+    mem = subprocess.check_output(["free"], text=True)
     memData = mem.split()
     
     memTotal = memData[8]
@@ -541,8 +583,11 @@ def get_mem_data():
 
 def displayMemData(delay):
 
-  #Get memory useage stats
-  memTotal, memUsed, memFree = get_mem_data()
+  # Read from cached stats (updated by background collector)
+  mem = shared_stats.get("memory", {})
+  memTotal = mem.get("total")
+  memUsed = mem.get("used")
+  memFree = mem.get("free")
   
   if memTotal:
     blank_display()
@@ -567,9 +612,9 @@ def displayMemData(delay):
 def get_network_data():
   try:
     #Get address and port data
-    addr = subprocess.check_output("ip add show dev eth0", shell=True, text=True)
+    addr = subprocess.check_output(["ip", "add", "show", "dev", "eth0"], text=True)
     #Get link stats
-    link = subprocess.check_output("ip -s link show eth0", shell=True, text=True)
+    link = subprocess.check_output(["ip", "-s", "link", "show", "eth0"], text=True)
     
     #Split data into list elements
     addrData = addr.split()
@@ -583,7 +628,7 @@ def get_network_data():
        ip_val = addrData[18].split("/")[0]
     except IndexError:
        ip_val = "N/A"
-       
+        
     mac_val = addrData[14].replace(":","")
     
     mtu_val = linkData[4]
@@ -616,11 +661,24 @@ def get_network_data():
 
 def displayNetworkData(page, delay):
   
-  #Get ip address
-  data = get_network_data()
+  # Read from cached stats (updated by background collector)
+  net = shared_stats.get("network", {})
+  port_val = net.get("port")
+  state_val = net.get("state")
+  ip_val = net.get("ip")
+  mac_val = net.get("mac")
+  mtu_val = net.get("mtu")
+  rx_val = net.get("rx")
+  tx_val = net.get("tx")
   
-  if data:
-    port, state, ip, mac, mtu, rx, tx = data
+  if port_val:
+    port = ("Port: " + port_val)
+    state = ("Network status: " + state_val)
+    ip = ("IP: " + ip_val)
+    mac = ("MAC: " + mac_val)
+    mtu = ("MTU: " + mtu_val)
+    rx = ("RX: " + rx_val)
+    tx = ("TX: " + tx_val)
     
     #Print Data
     if page ==1:
@@ -686,7 +744,7 @@ def format_gps_coord(val, dir, is_lat, degree_symbol=chr(223)):
 
 def get_gps_data():
   try:
-    output = subprocess.check_output("gpspipe -r -x 3", shell=True, text=True)
+    output = subprocess.check_output(["gpspipe", "-r", "-x", "3"], text=True)
     
     #Split output into list elements
     gpsPipe = output.split()
@@ -756,10 +814,26 @@ def get_gps_data():
 
 def displayGPSData(page, delay):
   
-  data = get_gps_data()
-
-  if data:
-    satellites, latitude, longitude, altitude, fix, pdop, hdop, vdop = data
+  # Read from cached stats (updated by background collector)
+  gps = shared_stats.get("gps", {})
+  sat_val = gps.get("satellites")
+  lat_val = gps.get("latitude")
+  lon_val = gps.get("longitude")
+  alt_val = gps.get("altitude")
+  fix_text = gps.get("fix")
+  pdop_val = gps.get("pdop")
+  hdop_val = gps.get("hdop")
+  vdop_val = gps.get("vdop")
+  
+  if sat_val:
+    satellites = ("Satellites: " + sat_val)
+    latitude = ("Lat: " + lat_val)
+    longitude = ("Lon: " + lon_val)
+    altitude = ("Alt: " + alt_val)
+    fix = ("Fix: " + fix_text)
+    pdop = ("PDOP: " + pdop_val)
+    hdop = ("HDOP: " + hdop_val)
+    vdop = ("VDOP: " + vdop_val)
 
     if page == 1:
       #Page 1
@@ -798,7 +872,7 @@ def displayGPSData(page, delay):
  
 def get_chrony_data():
   try:
-    output = subprocess.check_output("chronyc tracking", shell=True, text=True)
+    output = subprocess.check_output(["chronyc", "tracking"], text=True)
     #Split chronyc output into element list
     chronyResult = output.split()
     
@@ -835,14 +909,79 @@ def get_chrony_data():
     print(f"Chrony error: {e}")
     return None
 
+
+# Background collector thread - runs independently to keep stats fresh
+def stats_collector():
+  """Background thread that periodically collects all stats and caches them."""
+  # Initial collection intervals (seconds)
+  intervals = {
+    "memory": 10.0,
+    "network": 10.0,
+    "gps": 5.0,
+    "chrony": 2.0,
+  }
+  last_run = {k: 0.0 for k in intervals}
+  
+  while True:
+    now = time.time()
+    
+    # Memory
+    if now - last_run["memory"] >= intervals["memory"]:
+      try:
+        get_mem_data()
+        last_run["memory"] = now
+      except Exception as e:
+        print(f"Memory collector error: {e}")
+    
+    # Network
+    if now - last_run["network"] >= intervals["network"]:
+      try:
+        get_network_data()
+        last_run["network"] = now
+      except Exception as e:
+        print(f"Network collector error: {e}")
+    
+    # GPS
+    if now - last_run["gps"] >= intervals["gps"]:
+      try:
+        get_gps_data()
+        last_run["gps"] = now
+      except Exception as e:
+        print(f"GPS collector error: {e}")
+    
+    # Chrony
+    if now - last_run["chrony"] >= intervals["chrony"]:
+      try:
+        get_chrony_data()
+        last_run["chrony"] = now
+      except Exception as e:
+        print(f"Chrony collector error: {e}")
+    
+    # Update last_updated timestamp
+    shared_stats["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Sleep a bit before checking again
+    time.sleep(0.5)
+
+
 def displayChronyStats(page, delay):
   
   blank_display()
 
-  data = get_chrony_data()
-  if data:
-    systemTime, lastOffset, rmsOffset, freq, resFreq, skew, rootDly, rootDisp, upInt, lpStat = data
+  # Read from cached stats (updated by background collector)
+  chrony = shared_stats.get("chrony", {})
+  systemTime = chrony.get("system_time")
+  lastOffset = chrony.get("last_offset")
+  rmsOffset = chrony.get("rms_offset")
+  freq = chrony.get("frequency")
+  resFreq = chrony.get("residual_frequency")
+  skew = chrony.get("skew")
+  rootDly = chrony.get("root_delay")
+  rootDisp = chrony.get("root_dispersion")
+  upInt = chrony.get("update_interval")
+  lpStat = chrony.get("leap_status")
 
+  if systemTime:
     #Output stats to console and LCD
     if page == 1:
       #Page 1
