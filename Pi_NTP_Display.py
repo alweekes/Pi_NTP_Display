@@ -740,9 +740,6 @@ def get_chrony_data():
             stderr=subprocess.DEVNULL
         )
 
-        # DEBUG: print raw output to diagnose parsing issues
-        print(f"DEBUG chrony output:\n{output}")
-
         # Robust parsing using regex for each field
         # chronyc tracking output format:
         # Reference ID    : 47505300 (GPS)
@@ -763,9 +760,7 @@ def get_chrony_data():
 
         def extract(key, pattern=r'\s*:\s*(.+)$'):
             m = re.search(rf'^{re.escape(key)}{pattern}', output, re.MULTILINE)
-            result = m.group(1).strip() if m else None
-            print(f"DEBUG extract '{key}': {result}")
-            return result
+            return m.group(1).strip() if m else None
 
         ref_id = extract("Reference ID")
         stratum = extract("Stratum")
