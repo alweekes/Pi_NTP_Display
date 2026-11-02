@@ -734,23 +734,64 @@ def get_chrony_data():
             stderr=subprocess.DEVNULL
         )
 
-        chrony_result = output.split()
+        # Robust parsing using regex for each field
+        # chronyc tracking output format:
+        # Reference ID    : 47505300 (GPS)
+        # Stratum         : 1
+        # Ref time (UTC)  : Mon Nov 02 21:59:48 2026
+        # System time     : 0.000000001 seconds slow of NTP time
+        # Last offset     : +0.000007034 seconds
+        # RMS offset      : 0.000097306 seconds
+        # Frequency       : 12.116 ppm fast
+        # Residual freq   : +0.011 ppm
+        # Skew            : 0.269 ppm
+        # Root delay      : 0.000000001 seconds
+        # Root dispersion : 0.000030802 seconds
+        # Update interval : 16.0 seconds
+        # Leap status     : Normal
 
-        # Parse chronyc tracking output
-        # Indices based on chronyc tracking output format
-        system_time_val = chrony_result[20] + " " + chrony_result[22]
-        last_offset_val = chrony_result[29] + " s"
-        rms_offset_val = chrony_result[34] + " s"
-        freq_val = chrony_result[38] + " " + chrony_result[39] + " " + chrony_result[40]
-        res_freq_val = chrony_result[44] + " " + chrony_result[45]
-        skew_val = chrony_result[48] + " " + chrony_result[49]
-        root_dly_val = chrony_result[53] + " sec"
-        root_disp_val = chrony_result[58] + " sec"
-        up_int_val = chrony_result[63] + " sec"
-        lp_stat_val = chrony_result[68]
+        import re
+
+        def extract(key, pattern=r':\s*(.+)$'):
+            m = re.search(rf'^{re.escape(key)}{pattern}', output, re.MULTILINE)
+            return m.group(1).strip() if m else None
+
+        ref_id = extract("Reference ID")
+        stratum = extract("Stratum")
+        ref_time = extract("Ref time \(UTC\)")
+        system_time = extract("System time")
+        last_offset = extract("Last offset")
+        rms_offset = extract("RMS offset")
+        frequency = extract("Frequency")
+        res_freq = extract("Residual freq")
+        skew = extract("Skew")
+        root_delay = extract("Root delay")
+        root_dispersion = extract("Root dispersion")
+        update_interval = extract("Update interval")
+        leap_status = extract("Leap status")
+
+        # Validate required fields
+        if not all([system_time, last_offset, rms_offset, leap_status]):
+            raise ValueError("Missing required chrony fields")
+
+        # last_offset is like "+0.000007034 seconds" - extract numeric value for history
+        offset_match = re.search(r'([+-]?\d+\.?\d*)', last_offset)
+        offset_seconds = float(offset_match.group(1)) if offset_match else 0.0
 
         with history_lock:
-            offset_history.append([int(time.time() * 1000), float(chrony_result[29])])
+            offset_history.append([int(time.time() * 1000), offset_seconds])
+
+        # Format values to match original format for display compatibility
+        system_time_val = f"{system_time}"
+        last_offset_val = f"{last_offset}"
+        rms_offset_val = f"{rms_offset}"
+        freq_val = f"{frequency}"
+        res_freq_val = f"{res_freq}"
+        skew_val = f"{skew}"
+        root_dly_val = f"{root_delay} sec"
+        root_disp_val = f"{root_dispersion} sec"
+        up_int_val = f"{update_interval} sec"
+        lp_stat_val = f"{leap_status}"
 
         shared_stats["chrony"] = {
             "system_time": system_time_val,
