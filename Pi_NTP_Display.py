@@ -758,7 +758,7 @@ def get_chrony_data():
 
         ref_id = extract("Reference ID")
         stratum = extract("Stratum")
-        ref_time = extract("Ref time \(UTC\)")
+        ref_time = extract(r"Ref time \(UTC\)")
         system_time = extract("System time")
         last_offset = extract("Last offset")
         rms_offset = extract("RMS offset")
