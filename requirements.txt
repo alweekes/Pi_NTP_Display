@@ -1,0 +1,17 @@
+# Pi NTP Display - No-root version requirements
+# Install with: pip3 install -r requirements.txt
+
+# GPIO via gpiozero + lgpio (uses /dev/gpiomem, no root needed)
+gpiozero>=2.0
+lgpio>=0.2.1
+
+# System stats (pure Python, no root)
+psutil>=5.9.0
+
+# GPS via gpsd client (connects to gpsd socket, no root needed for socket)
+gpsd-py3>=1.0.0
+
+# NMEA parsing
+pynmea2>=1.18.0
+
+# Web server uses only Python standard library (http.server, socketserver, json, threading, hashlib)

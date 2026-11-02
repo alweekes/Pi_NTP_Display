@@ -11,7 +11,7 @@
 # https://www.raspberrypi-spy.co.uk/2012/08/20x4-lcd-module-control-using-python/
 #
 #---------------------------------------------------------------------------------
-
+#
 # The wiring for the LCD is as follows:
 # 1 : GND [RPi Pin 6]
 # 2 : 5V [RPi Pin 4]
@@ -29,23 +29,36 @@
 # 14: Data Bit 7 [RPi Pin 15]
 # 15: LCD Backlight +5V**
 # 16: LCD Backlight GND
-
+#
 # The wiring for the GPS is as follows:
 # Main NMEA via USB (/dev/ttyAMA0)
 # PPS signal for accurate timing GPIO Pin 18
+#
+# REQUIREMENTS (no root needed if user in gpio,dialout groups):
+#   pip3 install gpiozero lgpio psutil pynmea2 gpsd-py3
+#
+# GPIO: uses gpiozero + lgpio (via /dev/gpiomem) - needs 'gpio' group
+# GPS:  uses gpsd-py3 connecting to gpsd socket - needs 'dialout' group for serial device
+# Net/Mem: uses psutil (pure Python, no root)
+# Chrony: uses chronyc over Unix socket (chronyc -n tracking) - no root needed
+#
+#---------------------------------------------------------------------------------
 
-#import
+# import
 import pynmea2
-import RPi.GPIO as GPIO
+from gpiozero import DigitalOutputDevice
 import time
 from datetime import datetime
-import subprocess
 import threading
 import http.server
 import socketserver
 import json
 from collections import deque
 import hashlib
+import psutil
+import socket
+import re
+from gpsdclient import GPSDClient
 
 # Shared dictionary to store statistics for the web page
 shared_stats = {
@@ -65,7 +78,7 @@ stats_cache = {}
 stats_cache_lock = threading.Lock()
 CACHE_TTL = 2.0  # seconds
 
-# Define GPIO to LCD mapping
+# Define GPIO to LCD mapping (BCM numbering)
 LCD_RS = 7
 LCD_E  = 8
 LCD_D4 = 25
@@ -86,6 +99,14 @@ LCD_LINE_4 = 0xD4 # LCD RAM address for the 4th line
 # Timing constants
 E_PULSE = 0.0005
 E_DELAY = 0.0005
+
+# Global LCD pin objects (initialized in main)
+lcd_rs = None
+lcd_e = None
+lcd_d4 = None
+lcd_d5 = None
+lcd_d6 = None
+lcd_d7 = None
 
 # Web page served at '/'. It is static: the browser pulls live values from /api/stats
 WEB_PAGE = r"""<!DOCTYPE html>
@@ -207,7 +228,7 @@ WEB_PAGE = r"""<!DOCTYPE html>
   <section class="grid">
     <div class="panel">
       <h2>Chrony</h2>
-      <div class="row"><span class="k" tabindex="0" data-tip="How far the system clock currently is from chrony's best estimate of true time. Chrony slews the clock gradually rather than jumping it, so this shrinks over time. “Fast” means the clock is ahead.">System time</span><span class="v" id="c-system">--</span></div>
+      <div class="row"><span class="k" tabindex="0" data-tip="How far the system clock currently is from chrony's best estimate of true time. Chrony slews the clock gradually rather than jumping it, so this shrinks over time. "Fast" means the clock is ahead.">System time</span><span class="v" id="c-system">--</span></div>
       <div class="row"><span class="k" tabindex="0" data-tip="How fast or slow the Pi's crystal would run without correction, in parts per million. Chrony compensates for this continuously. 1 ppm is about 86 ms per day.">Frequency</span><span class="v" id="c-freq">--</span></div>
       <div class="row"><span class="k" tabindex="0" data-tip="The difference between the frequency the reference source suggests and the one chrony is using. Near zero means chrony's frequency estimate is accurate.">Residual freq</span><span class="v" id="c-resfreq">--</span></div>
       <div class="row"><span class="k" tabindex="0" data-tip="The estimated error bound on the frequency value. Smaller means chrony is more confident in its frequency estimate.">Skew</span><span class="v" id="c-skew">--</span></div>
@@ -292,7 +313,7 @@ WEB_PAGE = r"""<!DOCTYPE html>
     var svg = $("chart"), W = 600, H = 110, mid = H / 2;
     if (!hist || hist.length < 2) {
       svg.innerHTML = '<line class="zero" x1="0" y1="' + mid + '" x2="' + W + '" y2="' + mid + '"/>' +
-        '<text class="empty" x="8" y="' + (mid - 8) + '">collecting samples…</text>';
+        '<text class="empty" x="8" y="' + (mid - 8) + '">collecting samples...</text>';
       set("spark-range", "");
       return;
     }
@@ -308,7 +329,7 @@ WEB_PAGE = r"""<!DOCTYPE html>
       '<polygon class="area" points="0,' + mid + " " + pts.join(" ") + " " + W + "," + mid + '"/>' +
       '<polyline class="trace" points="' + pts.join(" ") + '"/>';
     var mins = Math.round(span / 60000);
-    set("spark-range", "±" + fmtSec(peak) + " · last " + (mins < 1 ? "<1" : mins) + " min");
+    set("spark-range", "\u00b1" + fmtSec(peak) + " \u00b7 last " + (mins < 1 ? "<1" : mins) + " min");
   }
 
   function render(d) {
@@ -342,8 +363,8 @@ WEB_PAGE = r"""<!DOCTYPE html>
 
     var total = parseInt(m.total, 10), used = parseInt(m.used, 10);
     if (total && !isNaN(used)) {
-      // `free` reports KiB
-      set("m-used", fmtBytes(used * 1024) + " / " + fmtBytes(total * 1024));
+      // psutil reports bytes
+      set("m-used", fmtBytes(used) + " / " + fmtBytes(total));
       $("m-bar").style.width = (used / total * 100).toFixed(1) + "%";
     }
     set("n-ip", n.ip);
@@ -370,7 +391,7 @@ WEB_PAGE = r"""<!DOCTYPE html>
         if (rtt <= bestRtt || recv - lastOk > 60000) {
           bestRtt = rtt;
           clockOffset = d.server_time_ms - (sent + recv) / 2;
-          set("drift", "This device vs server: " + (clockOffset >= 0 ? "-" : "+") + Math.abs(Math.round(clockOffset)) + " ms (±" + Math.ceil(rtt / 2) + ")");
+          set("drift", "This device vs server: " + (clockOffset >= 0 ? "-" : "+") + Math.abs(Math.round(clockOffset)) + " ms (\u00b1" + Math.ceil(rtt / 2) + ")");
         }
         lastOk = recv;
         render(d);
@@ -393,787 +414,781 @@ WEB_PAGE = r"""<!DOCTYPE html>
 WEB_PAGE_ETAG = hashlib.md5(WEB_PAGE.encode()).hexdigest()
 
 class StatsHandler(http.server.BaseHTTPRequestHandler):
-  def do_GET(self):
-    if self.path == '/':
-      # Check If-None-Match header for conditional request
-      if_none_match = self.headers.get('If-None-Match')
-      if if_none_match == WEB_PAGE_ETAG:
-        self.send_response(304)
-        self.end_headers()
-        return
-      
-      self.send_response(200)
-      self.send_header('Content-type', 'text/html; charset=utf-8')
-      self.send_header('Content-Length', str(len(WEB_PAGE.encode())))
-      self.send_header('ETag', WEB_PAGE_ETAG)
-      self.send_header('Cache-Control', 'public, max-age=60')
-      self.end_headers()
-      self.wfile.write(WEB_PAGE.encode())
-    elif self.path == '/api/stats':
-      # Serve fresh data from shared_stats (updated by background collector)
-      with history_lock:
-        history = list(offset_history)
-      payload = dict(shared_stats, offset_history=history, server_time_ms=int(time.time() * 1000))
-      body = json.dumps(payload).encode()
-      self.send_response(200)
-      self.send_header('Content-type', 'application/json')
-      self.send_header('Content-Length', str(len(body)))
-      self.send_header('Cache-Control', 'no-store')
-      self.end_headers()
-      self.wfile.write(body)
-    else:
-      self.send_error(404)
+    def do_GET(self):
+        if self.path == '/':
+            # Check If-None-Match header for conditional request
+            if_none_match = self.headers.get('If-None-Match')
+            if if_none_match == WEB_PAGE_ETAG:
+                self.send_response(304)
+                self.end_headers()
+                return
 
-  def send_body(self, body, content_type):
-    self.send_response(200)
-    self.send_header('Content-type', content_type)
-    self.send_header('Content-Length', str(len(body)))
-    self.send_header('Cache-Control', 'no-store')
-    self.end_headers()
-    self.wfile.write(body)
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(WEB_PAGE.encode())))
+            self.send_header('ETag', WEB_PAGE_ETAG)
+            self.send_header('Cache-Control', 'public, max-age=60')
+            self.end_headers()
+            self.wfile.write(WEB_PAGE.encode())
+        elif self.path == '/api/stats':
+            # Serve fresh data from shared_stats (updated by background collector)
+            with history_lock:
+                history = list(offset_history)
+            payload = dict(shared_stats, offset_history=history, server_time_ms=int(time.time() * 1000))
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_error(404)
 
-  def log_message(self, format, *args):
-    # The page polls every 2s; don't flood the console with access logs
-    pass
+    def log_message(self, format, *args):
+        # The page polls every 2s; don't flood the console with access logs
+        pass
 
 def run_web_server():
-  PORT = 8080
-  Handler = StatsHandler
-  # Allow address reuse to avoid 'Address already in use' errors
-  socketserver.TCPServer.allow_reuse_address = True
-  # Use ThreadingTCPServer to handle multiple concurrent requests
-  class ThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    allow_reuse_address = True
-    daemon_threads = True
-  
-  with ThreadingHTTPServer(("", PORT), Handler) as httpd:
-    print(f"Serving at port {PORT}")
-    httpd.serve_forever()
+    PORT = 8080
+    Handler = StatsHandler
+    # Allow address reuse to avoid 'Address already in use' errors
+    socketserver.TCPServer.allow_reuse_address = True
+    # Use ThreadingTCPServer to handle multiple concurrent requests
+    class ThreadingHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
 
-def main():
-  # Main program block
-  
-  # Start Web Server in a separate thread
-  try:
-    web_thread = threading.Thread(target=run_web_server, daemon=True)
-    web_thread.start()
-    print("Web server started on port 8080")
-  except Exception as e:
-    print(f"Failed to start web server: {e}")
+    with ThreadingHTTPServer(("", PORT), Handler) as httpd:
+        print(f"Serving at port {PORT}")
+        httpd.serve_forever()
 
-  # Start background stats collector thread
-  try:
-    collector_thread = threading.Thread(target=stats_collector, daemon=True)
-    collector_thread.start()
-    print("Stats collector started")
-  except Exception as e:
-    print(f"Failed to start stats collector: {e}")
 
-  GPIO.setmode(GPIO.BCM)       # Use BCM GPIO numbers
-  GPIO.setup(LCD_E, GPIO.OUT)  # E
-  GPIO.setup(LCD_RS, GPIO.OUT) # RS
-  GPIO.setup(LCD_D4, GPIO.OUT) # DB4
-  GPIO.setup(LCD_D5, GPIO.OUT) # DB5
-  GPIO.setup(LCD_D6, GPIO.OUT) # DB6
-  GPIO.setup(LCD_D7, GPIO.OUT) # DB7
+# =============================================================================
+# LCD Functions using gpiozero (no root required with gpio group)
+# =============================================================================
 
-  # Initialise display
-  lcd_init()
+def lcd_toggle_enable():
+    # Toggle enable
+    time.sleep(E_DELAY)
+    lcd_e.on()
+    time.sleep(E_PULSE)
+    lcd_e.off()
+    time.sleep(E_DELAY)
 
-  # Startup message
-  lcd_string("GPS Disciplined",LCD_LINE_1,2)
-  lcd_string("NTP Time Server",LCD_LINE_2,2)
-  lcd_string("v1.0 28/12/23",LCD_LINE_3,2)
-  lcd_string("Andrew L. Weekes",LCD_LINE_4,2)
-  time.sleep(2) # 2 second delay
+def lcd_byte(bits, mode):
+    # Send byte to data pins
+    # bits = data
+    # mode = True  for character
+    #        False for command
+    lcd_rs.value = mode
 
-  # Time to display each stats page (seconds)
-  stats_delay = 3
-  # Time to display time page (seconds)
-  time_cycles = 10
-  # Number of GPS data chronyPages
-  gpsPages = 2
-  # Number of chronyStats chronyPages
-  chronyPages = 5
-  # Number of pages of network stats
-  netPages = 2
+    # High bits
+    lcd_d4.off()
+    lcd_d5.off()
+    lcd_d6.off()
+    lcd_d7.off()
+    if bits & 0x10 == 0x10:
+        lcd_d4.on()
+    if bits & 0x20 == 0x20:
+        lcd_d5.on()
+    if bits & 0x40 == 0x40:
+        lcd_d6.on()
+    if bits & 0x80 == 0x80:
+        lcd_d7.on()
 
-  while True:
+    # Toggle 'Enable' pin
+    lcd_toggle_enable()
 
-    # Display time and network stats alternately
-    i = 1
-    while i <= netPages:
-      displayTime(time_cycles)
-      displayNetworkData(i, stats_delay)
-      if i == netPages:
-        break
-      i += 1
+    # Low bits
+    lcd_d4.off()
+    lcd_d5.off()
+    lcd_d6.off()
+    lcd_d7.off()
+    if bits & 0x01 == 0x01:
+        lcd_d4.on()
+    if bits & 0x02 == 0x02:
+        lcd_d5.on()
+    if bits & 0x04 == 0x04:
+        lcd_d6.on()
+    if bits & 0x08 == 0x08:
+        lcd_d7.on()
 
-    # Display time and memory stats
-    displayTime(time_cycles)
-    displayMemData(stats_delay)
+    # Toggle 'Enable' pin
+    lcd_toggle_enable()
 
-    # Display time and GPS data alternately
-    i = 1
-    while i <= gpsPages:
-      displayTime(time_cycles)
-      displayGPSData(i, stats_delay)
-      if i == gpsPages:
-        break
-      i += 1
+def lcd_init():
+    # Initialise display
+    lcd_byte(0x33, LCD_CMD) # 110011 Initialise
+    lcd_byte(0x32, LCD_CMD) # 110010 Initialise
+    lcd_byte(0x06, LCD_CMD) # 000110 Cursor move direction
+    lcd_byte(0x0C, LCD_CMD) # 001100 Display On,Cursor Off, Blink Off
+    lcd_byte(0x28, LCD_CMD) # 101000 Data length, number of lines, font size
+    lcd_byte(0x01, LCD_CMD) # 000001 Clear display
+    time.sleep(E_DELAY)
 
-    # Display time and chrony stats alternately
-    i = 1
-    while i <= chronyPages:
-      displayTime(time_cycles)
-      displayChronyStats(i, stats_delay)
-      if i == chronyPages:
-        break
-      i += 1
+def blank_display():
+    # Blank display
+    lcd_byte(0x01, LCD_CMD)
 
-def displayTime(cycles):
-  
-  blank_display()
-  
-  # Initialise cycl count
-  x=1
+def lcd_string(message, line, style):
+    # Send string to display
+    # style=1 Left justified
+    # style=2 Centred
+    # style=3 Right justified
 
-  # Print page title
-  lcd_string("Date and Time",LCD_LINE_1,2)
-  lcd_string("--------------------",LCD_LINE_2,2)
+    if style == 1:
+        message = message.ljust(LCD_WIDTH, " ")
+    elif style == 2:
+        message = message.center(LCD_WIDTH, " ")
+    elif style == 3:
+        message = message.rjust(LCD_WIDTH, " ")
 
-  #Initialise time and date stringa
-  timestr = ""
-  datestr = ""
+    lcd_byte(line, LCD_CMD)
 
-  while x < cycles:
-    #Get current date and time
-    now = datetime.now()
-    shared_stats["last_updated"] = now.strftime("%Y-%m-%d %H:%M:%S")
+    for i in range(LCD_WIDTH):
+        lcd_byte(ord(message[i]), LCD_CHR)
 
-    #Update only if changed
-    if datestr != now.strftime("%b %d, %Y"):
-      datestr = now.strftime("%b %d, %Y")
-      print(datestr)
-      lcd_string(datestr,LCD_LINE_3,2)
 
-    if timestr != now.strftime("%H:%M:%S"):
-      timestr = now.strftime("%H:%M:%S")
-      print(timestr)
-      lcd_string(timestr,LCD_LINE_4,2)
-
-    x += 1
-    time.sleep(1)
+# =============================================================================
+# Data Collection Functions (no subprocess, no root)
+# =============================================================================
 
 def get_mem_data():
-  try:
-    mem = subprocess.check_output(["free"], text=True)
-    memData = mem.split()
-    
-    memTotal = memData[8]
-    memUsed = memData[9]
-    memFree = memData[10]
-    
-    shared_stats["memory"] = {
-      "total": memTotal,
-      "used": memUsed,
-      "free": memFree
-    }
-    
-    return ("Total: " + memTotal), ("Used: " + memUsed), ("Free: " + memFree)
-  except Exception as e:
-    print(f"Error getting memory stats: {e}")
-    return None, None, None
-
-def displayMemData(delay):
-
-  # Read from cached stats (updated by background collector)
-  mem = shared_stats.get("memory", {})
-  memTotal = mem.get("total")
-  memUsed = mem.get("used")
-  memFree = mem.get("free")
-  
-  if memTotal:
-    blank_display()
-    print ("Memory Stats")
-    lcd_string("Memory Stats",LCD_LINE_1,2)
-    print (memTotal)
-    lcd_string(memTotal,LCD_LINE_2,1)
-    print (memUsed)
-    lcd_string(memUsed,LCD_LINE_3,1)
-    print (memFree)
-    lcd_string(memFree,LCD_LINE_4,1)
-  else:
-    print("Error getting memory stats")
-    blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*   Memory stats   *",LCD_LINE_2,2)
-    lcd_string("*      error       *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-
-  time.sleep(delay)
+    try:
+        mem = psutil.virtual_memory()
+        # psutil returns bytes
+        shared_stats["memory"] = {
+            "total": str(mem.total),
+            "used": str(mem.used),
+            "free": str(mem.available)
+        }
+        return True
+    except Exception as e:
+        print(f"Error getting memory stats: {e}")
+        return False
 
 def get_network_data():
-  try:
-    #Get address and port data
-    addr = subprocess.check_output(["ip", "add", "show", "dev", "eth0"], text=True)
-    #Get link stats
-    link = subprocess.check_output(["ip", "-s", "link", "show", "eth0"], text=True)
-    
-    #Split data into list elements
-    addrData = addr.split()
-    linkData = link.split()
-
-    port_val = addrData[1]
-    state_val = addrData[8]
-    # Handle cases where IP might be missing or different index
-    # The original code used hardcoded indices which is risky, keeping similar logic but being careful
     try:
-       ip_val = addrData[18].split("/")[0]
-    except IndexError:
-       ip_val = "N/A"
-        
-    mac_val = addrData[14].replace(":","")
-    
-    mtu_val = linkData[4]
-    rx_val = linkData[26]
-    tx_val = linkData[39]
+        # Get interface info for eth0 (or first non-loopback)
+        addrs = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
+        io_counters = psutil.net_io_counters(pernic=True)
 
-    shared_stats["network"] = {
-      "port": port_val,
-      "state": state_val,
-      "ip": ip_val,
-      "mac": mac_val,
-      "mtu": mtu_val,
-      "rx": rx_val,
-      "tx": tx_val
-    }
+        # Find the primary interface (prefer eth0, then first non-loopback up interface)
+        target_iface = None
+        for iface in ['eth0', 'enp0s3', 'enx*', 'wlan0']:
+            if iface in addrs:
+                target_iface = iface
+                break
+        if not target_iface:
+            for iface, iface_addrs in addrs.items():
+                if iface != 'lo' and iface in stats and stats[iface].isup:
+                    target_iface = iface
+                    break
 
-    port = ("Port: " + port_val)
-    state = ("Network status: " + state_val)
-    ip = ("IP: " + ip_val)
-    mac = ("MAC: " + mac_val)
+        if not target_iface:
+            return False
 
-    mtu = ("MTU: " + mtu_val)
-    rx = ("RX: " + rx_val)
-    tx = ("TX: " + tx_val)
-    
-    return port, state, ip, mac, mtu, rx, tx
-  except Exception as e:
-    print(f"Network error: {e}")
-    return None
+        iface_addrs = addrs[target_iface]
+        iface_stats = stats.get(target_iface)
+        iface_io = io_counters.get(target_iface, None)
 
-def displayNetworkData(page, delay):
-  
-  # Read from cached stats (updated by background collector)
-  net = shared_stats.get("network", {})
-  port_val = net.get("port")
-  state_val = net.get("state")
-  ip_val = net.get("ip")
-  mac_val = net.get("mac")
-  mtu_val = net.get("mtu")
-  rx_val = net.get("rx")
-  tx_val = net.get("tx")
-  
-  if port_val:
-    port = ("Port: " + port_val)
-    state = ("Network status: " + state_val)
-    ip = ("IP: " + ip_val)
-    mac = ("MAC: " + mac_val)
-    mtu = ("MTU: " + mtu_val)
-    rx = ("RX: " + rx_val)
-    tx = ("TX: " + tx_val)
-    
-    #Print Data
-    if page ==1:
-      #Page 1
-      blank_display()
-      print (port)
-      lcd_string(port,LCD_LINE_1,1)
-      print (state)
-      lcd_string(state,LCD_LINE_2,1)
-      print (ip)
-      lcd_string(ip,LCD_LINE_3,1)
-      print (mac)
-      lcd_string(mac,LCD_LINE_4,1)
+        ip_val = "N/A"
+        mac_val = "N/A"
+        state_val = "DOWN"
+        mtu_val = "N/A"
 
-    elif page == 2:
-      #Page 2
-      blank_display()
-      print (mtu)
-      lcd_string(mtu,LCD_LINE_1,1)
-      print (rx)
-      lcd_string(rx,LCD_LINE_2,1)
-      print (tx)
-      lcd_string(tx,LCD_LINE_3,1)
+        for addr in iface_addrs:
+            if addr.family == socket.AF_INET:
+                ip_val = addr.address
+            elif addr.family == socket.AF_PACKET:
+                mac_val = addr.address.replace(':', '')
 
-  else:
-    print("Network error")
-    blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  Network error   *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-    
-  time.sleep(delay)
+        if iface_stats:
+            state_val = "UP" if iface_stats.isup else "DOWN"
+            mtu_val = str(iface_stats.mtu)
+
+        rx_val = str(iface_io.bytes_recv) if iface_io else "0"
+        tx_val = str(iface_io.bytes_sent) if iface_io else "0"
+        port_val = target_iface
+
+        shared_stats["network"] = {
+            "port": port_val,
+            "state": state_val,
+            "ip": ip_val,
+            "mac": mac_val,
+            "mtu": mtu_val,
+            "rx": rx_val,
+            "tx": tx_val
+        }
+        return True
+    except Exception as e:
+        print(f"Network error: {e}")
+        return False
 
 def format_gps_coord(val, dir, is_lat, degree_symbol=chr(223)):
-  # Determine the degree part length based on lat/lon
-  # Lat: DDMM.MMMM -> 2 digits for degrees
-  # Lon: DDDMM.MMMM -> 3 digits for degrees
-  deg_len = 2 if is_lat else 3
+    # Determine the degree part length based on lat/lon
+    # Lat: DDMM.MMMM -> 2 digits for degrees
+    # Lon: DDDMM.MMMM -> 3 digits for degrees
+    deg_len = 2 if is_lat else 3
 
-  try:
-    # Check if val is a string or float, handle accordingly.
-    # pynmea2 usually provides these as strings or floats depending on the exact property accessed.
-    # The user code was using `msg.lat` (string) + `msg.lat_dir` (string).
-    # We need to parse the raw string "DDMM.MMMM"
+    try:
+        val_str = str(val).strip()
+        if not val_str:
+            return "N/A"
 
-    # Ensure it's a string for slicing
-    val_str = str(val).strip()
-    if not val_str: return "N/A"
+        degrees = val_str[:deg_len]
+        minutes = val_str[deg_len:]
 
-    degrees = val_str[:deg_len]
-    minutes = val_str[deg_len:]
-
-    # degree_symbol defaults to chr(223), the HD44780 ROM code for the
-    # degree glyph on the physical LCD. The web page passes the real
-    # Unicode degree sign (U+00B0) instead, since chr(223) is 'ß' in
-    # Unicode text and renders as garbage in a browser.
-
-    return f"{degrees}{degree_symbol}{minutes}'{dir}"
-  except Exception as e:
-    print(f"Error formatting: {e}")
-    return f"{val}{dir}"
-
+        # degree_symbol defaults to chr(223), the HD44780 ROM code for the
+        # degree glyph on the physical LCD. The web page passes the real
+        # Unicode degree sign (U+00B0) instead, since chr(223) is 'ß' in
+        # Unicode text and renders as garbage in a browser.
+        return f"{degrees}{degree_symbol}{minutes}'{dir}"
+    except Exception as e:
+        print(f"Error formatting: {e}")
+        return f"{val}{dir}"
 
 def nmea_to_decimal(val, dir, is_lat):
-  """Convert NMEA DDMM.MMMM format to decimal degrees."""
-  try:
-    val_str = str(val).strip()
-    if not val_str:
-      return None
-    deg_len = 2 if is_lat else 3
-    degrees = float(val_str[:deg_len])
-    minutes = float(val_str[deg_len:])
-    decimal = degrees + minutes / 60.0
-    if dir in ('S', 'W'):
-      decimal = -decimal
-    return decimal
-  except Exception as e:
-    print(f"Error converting to decimal: {e}")
-    return None
-
+    """Convert NMEA DDMM.MMMM format to decimal degrees."""
+    try:
+        val_str = str(val).strip()
+        if not val_str:
+            return None
+        deg_len = 2 if is_lat else 3
+        degrees = float(val_str[:deg_len])
+        minutes = float(val_str[deg_len:])
+        decimal = degrees + minutes / 60.0
+        if dir in ('S', 'W'):
+            decimal = -decimal
+        return decimal
+    except Exception as e:
+        print(f"Error converting to decimal: {e}")
+        return None
 
 def get_gps_data():
-  try:
-    output = subprocess.check_output(["gpspipe", "-r", "-x", "3"], text=True)
-    
-    #Split output into list elements
-    gpsPipe = output.split()
-    
-    # Get $GPGGA messages for location data
-    pattern = "$GPGGA"
-    gpgga = [x for x in gpsPipe if x.startswith(pattern)]
-    
-    if not gpgga:
-       raise ValueError("No GPGGA message found")
+    try:
+        # Connect to gpsd (default localhost:2947)
+        client = GPSDClient(host="127.0.0.1", port=2947, timeout=5)
 
-    # pynmea2 can't process list, so pick first available item in list
-    msg = pynmea2.parse(gpgga[0])
+        # Get TPV (position) and SKY (satellites/DOP) reports
+        tpv_report = None
+        sky_report = None
 
-    sat_val = msg.num_sats
-    lat_val = format_gps_coord(msg.lat, msg.lat_dir, True)
-    lon_val = format_gps_coord(msg.lon, msg.lon_dir, False)
-    # Web page uses the real Unicode degree sign; the LCD uses its own ROM glyph (chr(223))
-    lat_web = format_gps_coord(msg.lat, msg.lat_dir, True, degree_symbol="°")
-    lon_web = format_gps_coord(msg.lon, msg.lon_dir, False, degree_symbol="°")
-    # Decimal degrees for easy copy/paste into maps
-    lat_decimal = nmea_to_decimal(msg.lat, msg.lat_dir, True)
-    lon_decimal = nmea_to_decimal(msg.lon, msg.lon_dir, False)
-    alt_val = str(msg.altitude) + msg.altitude_units
+        for report in client.dict_stream():
+            if report.get('class') == 'TPV' and hasattr(report, 'lat') and report.lat is not None:
+                tpv_report = report
+            elif report.get('class') == 'SKY':
+                sky_report = report
+            if tpv_report and sky_report:
+                break
 
-    # Get $GPGSA message for fix and dilution of precision data
-    pattern = "$GPGSA"
-    gpgsa = [x for x in gpsPipe if x.startswith(pattern)]
-    
-    if not gpgsa:
-      raise ValueError("No GPGSA message found")
+        if not tpv_report:
+            raise ValueError("No TPV report from gpsd")
 
-    # pynmea2 can't process list, so pick first available item in list
-    dop = pynmea2.parse(gpgsa[0])
+        # Extract GPS data
+        sat_val = str(sky_report.get('nSat', 0)) if sky_report else "0"
+        lat_val = format_gps_coord(tpv_report.lat, 'N' if tpv_report.lat >= 0 else 'S', True)
+        lon_val = format_gps_coord(tpv_report.lon, 'E' if tpv_report.lon >= 0 else 'W', False)
+        lat_web = format_gps_coord(tpv_report.lat, 'N' if tpv_report.lat >= 0 else 'S', True, degree_symbol="°")
+        lon_web = format_gps_coord(tpv_report.lon, 'E' if tpv_report.lon >= 0 else 'W', False, degree_symbol="°")
+        lat_decimal = tpv_report.lat
+        lon_decimal = tpv_report.lon
+        alt_val = f"{tpv_report.alt:.1f}m" if tpv_report.alt is not None else "N/A"
 
-    fix_mode = dop.mode_fix_type
-    pdop_val = dop.pdop
-    hdop_val = dop.hdop
-    vdop_val = dop.vdop
-    
-    readable_fix = ("No fix", "2D Fix", "3D Fix")
-    fix_text = readable_fix[int(fix_mode) -1]
+        # Fix mode: 1=No fix, 2=2D, 3=3D
+        fix_mode = sky_report.get('mode', 1) if sky_report else 1
+        pdop_val = f"{sky_report.get('pdop', 0):.1f}" if sky_report else "0"
+        hdop_val = f"{sky_report.get('hdop', 0):.1f}" if sky_report else "0"
+        vdop_val = f"{sky_report.get('vdop', 0):.1f}" if sky_report else "0"
 
-    shared_stats["gps"] = {
-      "satellites": sat_val,
-      "latitude": lat_web,
-      "longitude": lon_web,
-      "latitude_decimal": lat_decimal,
-      "longitude_decimal": lon_decimal,
-      "altitude": alt_val,
-      "fix": fix_text,
-      "pdop": pdop_val,
-      "hdop": hdop_val,
-      "vdop": vdop_val
-    }
+        readable_fix = ("No fix", "2D Fix", "3D Fix")
+        fix_text = readable_fix[fix_mode] if fix_mode < 3 else "3D Fix"
 
-    satellites = ("Satellites: " + sat_val)
-    latitude = ("Lat: " + lat_val)
-    longitude = ("Lon: " + lon_val)
-    altitude = ("Alt: " + alt_val)
-    
-    fix = ("Fix: " + fix_text)
-    pdop = ("PDOP: " + pdop_val)
-    hdop = ("HDOP: " + hdop_val)
-    vdop = ("VDOP: " + vdop_val)
-    
-    return satellites, latitude, longitude, altitude, fix, pdop, hdop, vdop
-    
-  except Exception as e:
-    print(f"GPS error: {e}")
-    return None
+        shared_stats["gps"] = {
+            "satellites": sat_val,
+            "latitude": lat_web,
+            "longitude": lon_web,
+            "latitude_decimal": lat_decimal,
+            "longitude_decimal": lon_decimal,
+            "altitude": alt_val,
+            "fix": fix_text,
+            "pdop": pdop_val,
+            "hdop": hdop_val,
+            "vdop": vdop_val
+        }
+        return True
 
-def displayGPSData(page, delay):
-  
-  # Read from cached stats (updated by background collector)
-  gps = shared_stats.get("gps", {})
-  sat_val = gps.get("satellites")
-  lat_val = gps.get("latitude")
-  lon_val = gps.get("longitude")
-  alt_val = gps.get("altitude")
-  fix_text = gps.get("fix")
-  pdop_val = gps.get("pdop")
-  hdop_val = gps.get("hdop")
-  vdop_val = gps.get("vdop")
-  
-  if sat_val:
-    satellites = ("Satellites: " + sat_val)
-    latitude = ("Lat: " + lat_val)
-    longitude = ("Lon: " + lon_val)
-    altitude = ("Alt: " + alt_val)
-    fix = ("Fix: " + fix_text)
-    pdop = ("PDOP: " + pdop_val)
-    hdop = ("HDOP: " + hdop_val)
-    vdop = ("VDOP: " + vdop_val)
+    except Exception as e:
+        print(f"GPS error: {e}")
+        return False
 
-    if page == 1:
-      #Page 1
-      blank_display()
-      print(satellites)
-      print(latitude)
-      print(longitude)
-      print(altitude)
-      lcd_string(satellites,LCD_LINE_3,1)
-      lcd_string(latitude,LCD_LINE_1,1)
-      lcd_string(longitude,LCD_LINE_2,1)
-      lcd_string(altitude,LCD_LINE_4,1)
-
-    elif page == 2:
-      #Page 2
-      blank_display()
-      print(fix)
-      print(pdop)
-      print(hdop)
-      print(vdop)
-      lcd_string(fix,LCD_LINE_1,1)
-      lcd_string(pdop,LCD_LINE_2,1)
-      lcd_string(hdop,LCD_LINE_3,1)
-      lcd_string(vdop,LCD_LINE_4,1)
-
-    time.sleep(delay)
-  
-  else:
-    print("gpspipe error or no gps data")
-    blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  gpspipe error   *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-    time.sleep(delay)
- 
 def get_chrony_data():
-  try:
-    output = subprocess.check_output(["chronyc", "tracking"], text=True)
-    #Split chronyc output into element list
-    chronyResult = output.split()
-    
-    systemTime_val = (chronyResult[20] + " " + "s " + chronyResult[22])
-    lastOffset_val = (chronyResult[29] + " s")
-    rmsOffset_val = (chronyResult[34] + " s")
-    freq_val = (chronyResult[38] + " " + chronyResult[39] + " " + chronyResult[40])
-    resFreq_val = (chronyResult[44] + " " + chronyResult[45])
-    skew_val = (chronyResult[48] + " " + chronyResult[49])
-    rootDly_val = (chronyResult[53] + " sec")
-    rootDisp_val = (chronyResult[58] + " sec")
-    upInt_val = (chronyResult[63] + " sec")
-    lpStat_val = (chronyResult[68])
+    try:
+        # Use chronyc over Unix socket (no root needed)
+        import subprocess
+        output = subprocess.check_output(
+            ["chronyc", "-n", "tracking"],
+            text=True,
+            stderr=subprocess.DEVNULL
+        )
 
-    with history_lock:
-      offset_history.append([int(time.time() * 1000), float(chronyResult[29])])
+        chrony_result = output.split()
 
-    shared_stats["chrony"] = {
-      "system_time": systemTime_val,
-      "last_offset": lastOffset_val,
-      "rms_offset": rmsOffset_val,
-      "frequency": freq_val,
-      "residual_frequency": resFreq_val,
-      "skew": skew_val,
-      "root_delay": rootDly_val,
-      "root_dispersion": rootDisp_val,
-      "update_interval": upInt_val,
-      "leap_status": lpStat_val
-    }
+        # Parse chronyc tracking output
+        # Indices based on chronyc tracking output format
+        system_time_val = chrony_result[20] + " " + chrony_result[22]
+        last_offset_val = chrony_result[29] + " s"
+        rms_offset_val = chrony_result[34] + " s"
+        freq_val = chrony_result[38] + " " + chrony_result[39] + " " + chrony_result[40]
+        res_freq_val = chrony_result[44] + " " + chrony_result[45]
+        skew_val = chrony_result[48] + " " + chrony_result[49]
+        root_dly_val = chrony_result[53] + " sec"
+        root_disp_val = chrony_result[58] + " sec"
+        up_int_val = chrony_result[63] + " sec"
+        lp_stat_val = chrony_result[68]
 
-    return systemTime_val, lastOffset_val, rmsOffset_val, freq_val, resFreq_val, skew_val, rootDly_val, rootDisp_val, upInt_val, lpStat_val
+        with history_lock:
+            offset_history.append([int(time.time() * 1000), float(chrony_result[29])])
 
-  except Exception as e:
-    print(f"Chrony error: {e}")
-    return None
+        shared_stats["chrony"] = {
+            "system_time": system_time_val,
+            "last_offset": last_offset_val,
+            "rms_offset": rms_offset_val,
+            "frequency": freq_val,
+            "residual_frequency": res_freq_val,
+            "skew": skew_val,
+            "root_delay": root_dly_val,
+            "root_dispersion": root_disp_val,
+            "update_interval": up_int_val,
+            "leap_status": lp_stat_val
+        }
+        return True
+
+    except Exception as e:
+        print(f"Chrony error: {e}")
+        return False
 
 
 # Background collector thread - runs independently to keep stats fresh
 def stats_collector():
-  """Background thread that periodically collects all stats and caches them."""
-  # Initial collection intervals (seconds)
-  intervals = {
-    "memory": 10.0,
-    "network": 10.0,
-    "gps": 5.0,
-    "chrony": 2.0,
-  }
-  last_run = {k: 0.0 for k in intervals}
-  
-  while True:
-    now = time.time()
-    
-    # Memory
-    if now - last_run["memory"] >= intervals["memory"]:
-      try:
-        get_mem_data()
-        last_run["memory"] = now
-      except Exception as e:
-        print(f"Memory collector error: {e}")
-    
-    # Network
-    if now - last_run["network"] >= intervals["network"]:
-      try:
-        get_network_data()
-        last_run["network"] = now
-      except Exception as e:
-        print(f"Network collector error: {e}")
-    
-    # GPS
-    if now - last_run["gps"] >= intervals["gps"]:
-      try:
-        get_gps_data()
-        last_run["gps"] = now
-      except Exception as e:
-        print(f"GPS collector error: {e}")
-    
-    # Chrony
-    if now - last_run["chrony"] >= intervals["chrony"]:
-      try:
-        get_chrony_data()
-        last_run["chrony"] = now
-      except Exception as e:
-        print(f"Chrony collector error: {e}")
-    
-    # Update last_updated timestamp
-    shared_stats["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Sleep a bit before checking again
-    time.sleep(0.5)
+    """Background thread that periodically collects all stats and caches them."""
+    # Initial collection intervals (seconds)
+    intervals = {
+        "memory": 10.0,
+        "network": 10.0,
+        "gps": 5.0,
+        "chrony": 2.0,
+    }
+    last_run = {k: 0.0 for k in intervals}
 
+    while True:
+        now = time.time()
+
+        # Memory
+        if now - last_run["memory"] >= intervals["memory"]:
+            try:
+                get_mem_data()
+                last_run["memory"] = now
+            except Exception as e:
+                print(f"Memory collector error: {e}")
+
+        # Network
+        if now - last_run["network"] >= intervals["network"]:
+            try:
+                get_network_data()
+                last_run["network"] = now
+            except Exception as e:
+                print(f"Network collector error: {e}")
+
+        # GPS
+        if now - last_run["gps"] >= intervals["gps"]:
+            try:
+                get_gps_data()
+                last_run["gps"] = now
+            except Exception as e:
+                print(f"GPS collector error: {e}")
+
+        # Chrony
+        if now - last_run["chrony"] >= intervals["chrony"]:
+            try:
+                get_chrony_data()
+                last_run["chrony"] = now
+            except Exception as e:
+                print(f"Chrony collector error: {e}")
+
+        # Update last_updated timestamp
+        shared_stats["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Sleep a bit before checking again
+        time.sleep(0.5)
+
+
+# =============================================================================
+# Display Functions (read from shared_stats)
+# =============================================================================
+
+def displayTime(cycles):
+    blank_display()
+
+    # Initialise cycle count
+    x = 1
+
+    # Print page title
+    lcd_string("Date and Time", LCD_LINE_1, 2)
+    lcd_string("--------------------", LCD_LINE_2, 2)
+
+    # Initialise time and date strings
+    timestr = ""
+    datestr = ""
+
+    while x < cycles:
+        # Get current date and time
+        now = datetime.now()
+        shared_stats["last_updated"] = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Update only if changed
+        if datestr != now.strftime("%b %d, %Y"):
+            datestr = now.strftime("%b %d, %Y")
+            print(datestr)
+            lcd_string(datestr, LCD_LINE_3, 2)
+
+        if timestr != now.strftime("%H:%M:%S"):
+            timestr = now.strftime("%H:%M:%S")
+            print(timestr)
+            lcd_string(timestr, LCD_LINE_4, 2)
+
+        x += 1
+        time.sleep(1)
+
+def displayMemData(delay):
+    # Read from cached stats (updated by background collector)
+    mem = shared_stats.get("memory", {})
+    memTotal = mem.get("total")
+    memUsed = mem.get("used")
+    memFree = mem.get("free")
+
+    if memTotal:
+        blank_display()
+        print("Memory Stats")
+        lcd_string("Memory Stats", LCD_LINE_1, 2)
+        print(f"Total: {memTotal}")
+        lcd_string(f"Total: {memTotal}", LCD_LINE_2, 1)
+        print(f"Used: {memUsed}")
+        lcd_string(f"Used: {memUsed}", LCD_LINE_3, 1)
+        print(f"Free: {memFree}")
+        lcd_string(f"Free: {memFree}", LCD_LINE_4, 1)
+    else:
+        print("Error getting memory stats")
+        blank_display()
+        lcd_string("********************", LCD_LINE_1, 2)
+        lcd_string("*   Memory stats   *", LCD_LINE_2, 2)
+        lcd_string("*      error       *", LCD_LINE_3, 2)
+        lcd_string("********************", LCD_LINE_4, 2)
+
+    time.sleep(delay)
+
+def displayNetworkData(page, delay):
+    # Read from cached stats (updated by background collector)
+    net = shared_stats.get("network", {})
+    port_val = net.get("port")
+    state_val = net.get("state")
+    ip_val = net.get("ip")
+    mac_val = net.get("mac")
+    mtu_val = net.get("mtu")
+    rx_val = net.get("rx")
+    tx_val = net.get("tx")
+
+    if port_val:
+        port = f"Port: {port_val}"
+        state = f"Network status: {state_val}"
+        ip = f"IP: {ip_val}"
+        mac = f"MAC: {mac_val}"
+        mtu = f"MTU: {mtu_val}"
+        rx = f"RX: {rx_val}"
+        tx = f"TX: {tx_val}"
+
+        # Print Data
+        if page == 1:
+            # Page 1
+            blank_display()
+            print(port)
+            lcd_string(port, LCD_LINE_1, 1)
+            print(state)
+            lcd_string(state, LCD_LINE_2, 1)
+            print(ip)
+            lcd_string(ip, LCD_LINE_3, 1)
+            print(mac)
+            lcd_string(mac, LCD_LINE_4, 1)
+
+        elif page == 2:
+            # Page 2
+            blank_display()
+            print(mtu)
+            lcd_string(mtu, LCD_LINE_1, 1)
+            print(rx)
+            lcd_string(rx, LCD_LINE_2, 1)
+            print(tx)
+            lcd_string(tx, LCD_LINE_3, 1)
+
+    else:
+        print("Network error")
+        blank_display()
+        lcd_string("********************", LCD_LINE_1, 2)
+        lcd_string("*  Network error   *", LCD_LINE_2, 2)
+        lcd_string("*                  *", LCD_LINE_3, 2)
+        lcd_string("********************", LCD_LINE_4, 2)
+
+    time.sleep(delay)
+
+def displayGPSData(page, delay):
+    # Read from cached stats (updated by background collector)
+    gps = shared_stats.get("gps", {})
+    sat_val = gps.get("satellites")
+    lat_val = gps.get("latitude")
+    lon_val = gps.get("longitude")
+    alt_val = gps.get("altitude")
+    fix_text = gps.get("fix")
+    pdop_val = gps.get("pdop")
+    hdop_val = gps.get("hdop")
+    vdop_val = gps.get("vdop")
+
+    if sat_val:
+        satellites = f"Satellites: {sat_val}"
+        latitude = f"Lat: {lat_val}"
+        longitude = f"Lon: {lon_val}"
+        altitude = f"Alt: {alt_val}"
+        fix = f"Fix: {fix_text}"
+        pdop = f"PDOP: {pdop_val}"
+        hdop = f"HDOP: {hdop_val}"
+        vdop = f"VDOP: {vdop_val}"
+
+        if page == 1:
+            # Page 1
+            blank_display()
+            print(satellites)
+            print(latitude)
+            print(longitude)
+            print(altitude)
+            lcd_string(satellites, LCD_LINE_3, 1)
+            lcd_string(latitude, LCD_LINE_1, 1)
+            lcd_string(longitude, LCD_LINE_2, 1)
+            lcd_string(altitude, LCD_LINE_4, 1)
+
+        elif page == 2:
+            # Page 2
+            blank_display()
+            print(fix)
+            print(pdop)
+            print(hdop)
+            print(vdop)
+            lcd_string(fix, LCD_LINE_1, 1)
+            lcd_string(pdop, LCD_LINE_2, 1)
+            lcd_string(hdop, LCD_LINE_3, 1)
+            lcd_string(vdop, LCD_LINE_4, 1)
+
+        time.sleep(delay)
+
+    else:
+        print("gpsd error or no gps data")
+        blank_display()
+        lcd_string("********************", LCD_LINE_1, 2)
+        lcd_string("*   gpsd error     *", LCD_LINE_2, 2)
+        lcd_string("*                  *", LCD_LINE_3, 2)
+        lcd_string("********************", LCD_LINE_4, 2)
+        time.sleep(delay)
 
 def displayChronyStats(page, delay):
-  
-  blank_display()
-
-  # Read from cached stats (updated by background collector)
-  chrony = shared_stats.get("chrony", {})
-  systemTime = chrony.get("system_time")
-  lastOffset = chrony.get("last_offset")
-  rmsOffset = chrony.get("rms_offset")
-  freq = chrony.get("frequency")
-  resFreq = chrony.get("residual_frequency")
-  skew = chrony.get("skew")
-  rootDly = chrony.get("root_delay")
-  rootDisp = chrony.get("root_dispersion")
-  upInt = chrony.get("update_interval")
-  lpStat = chrony.get("leap_status")
-
-  if systemTime:
-    #Output stats to console and LCD
-    if page == 1:
-      #Page 1
-      blank_display()
-      print("System Time:")
-      print(systemTime)
-      print ("Last Offset:")
-      print(lastOffset)
-      lcd_string("System Time: ",LCD_LINE_1,1)
-      lcd_string(systemTime,LCD_LINE_2,3)
-      lcd_string("Last offset: ",LCD_LINE_3,1)
-      lcd_string(lastOffset,LCD_LINE_4,3)
-
-    elif page == 2:
-      #Page 2
-      blank_display()
-      print("RMS offset: ")
-      print(rmsOffset)
-      print("Frequency: ")
-      print(freq)
-      lcd_string("RMS offset: ",LCD_LINE_1,1)
-      lcd_string(rmsOffset, LCD_LINE_2,3)
-      lcd_string("Frequency: ",LCD_LINE_3,1)
-      lcd_string(freq,LCD_LINE_4,3)
-
-    elif page == 3:
-      #Page 3
-      blank_display()
-      print("Residual frequency: ")
-      print(resFreq)
-      print("Skew: ")
-      print(skew)
-      lcd_string("Residual frequency: ",LCD_LINE_1,1)
-      lcd_string(resFreq,LCD_LINE_2,3)
-      lcd_string("Skew: ",LCD_LINE_3,1)
-      lcd_string(skew,LCD_LINE_4,3)
-
-    elif page == 4:
-      #Page 4
-      blank_display()
-      print("Root delay: ")
-      print(rootDly)
-      print("Root dispersion: ")
-      print(rootDisp)
-      lcd_string("Root delay: ",LCD_LINE_1,1)
-      lcd_string(rootDly,LCD_LINE_2,3)
-      lcd_string("Root dispersion: ",LCD_LINE_3,1)
-      lcd_string(rootDisp,LCD_LINE_4,3)
-
-    elif page == 5:
-      #Page 5
-      blank_display()
-      print("Update Interval:")
-      print(upInt)
-      print("Leap Status: ")
-      print(lpStat)
-      lcd_string("Update Interval:",LCD_LINE_1,1)
-      lcd_string(upInt,LCD_LINE_2,3)
-      lcd_string("Leap Year Status: ",LCD_LINE_3,1)
-      lcd_string(lpStat,LCD_LINE_4,3)
-
-    time.sleep(delay)
-  
-  else:
-    print("chronyc error or no data")
     blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  chronyc error   *",LCD_LINE_2,2)
-    lcd_string("*                  *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-    time.sleep(delay)
 
-def blank_display():
-  # Blank display
-  lcd_byte(0x01, LCD_CMD)
+    # Read from cached stats (updated by background collector)
+    chrony = shared_stats.get("chrony", {})
+    systemTime = chrony.get("system_time")
+    lastOffset = chrony.get("last_offset")
+    rmsOffset = chrony.get("rms_offset")
+    freq = chrony.get("frequency")
+    resFreq = chrony.get("residual_frequency")
+    skew = chrony.get("skew")
+    rootDly = chrony.get("root_delay")
+    rootDisp = chrony.get("root_dispersion")
+    upInt = chrony.get("update_interval")
+    lpStat = chrony.get("leap_status")
 
-def lcd_init():
-  # Initialise display
-  lcd_byte(0x33,LCD_CMD) # 110011 Initialise
-  lcd_byte(0x32,LCD_CMD) # 110010 Initialise
-  lcd_byte(0x06,LCD_CMD) # 000110 Cursor move direction
-  lcd_byte(0x0C,LCD_CMD) # 001100 Display On,Cursor Off, Blink Off
-  lcd_byte(0x28,LCD_CMD) # 101000 Data length, number of lines, font size
-  lcd_byte(0x01,LCD_CMD) # 000001 Clear display
-  time.sleep(E_DELAY)
+    if systemTime:
+        # Output stats to console and LCD
+        if page == 1:
+            # Page 1
+            blank_display()
+            print("System Time:")
+            print(systemTime)
+            print("Last Offset:")
+            print(lastOffset)
+            lcd_string("System Time: ", LCD_LINE_1, 1)
+            lcd_string(systemTime, LCD_LINE_2, 3)
+            lcd_string("Last offset: ", LCD_LINE_3, 1)
+            lcd_string(lastOffset, LCD_LINE_4, 3)
 
-def lcd_byte(bits, mode):
-  # Send byte to data pins
-  # bits = data
-  # mode = True  for character
-  #        False for command
-  GPIO.output(LCD_RS, mode) # RS
+        elif page == 2:
+            # Page 2
+            blank_display()
+            print("RMS offset: ")
+            print(rmsOffset)
+            print("Frequency: ")
+            print(freq)
+            lcd_string("RMS offset: ", LCD_LINE_1, 1)
+            lcd_string(rmsOffset, LCD_LINE_2, 3)
+            lcd_string("Frequency: ", LCD_LINE_3, 1)
+            lcd_string(freq, LCD_LINE_4, 3)
 
-  # High bits
-  GPIO.output(LCD_D4, False)
-  GPIO.output(LCD_D5, False)
-  GPIO.output(LCD_D6, False)
-  GPIO.output(LCD_D7, False)
-  if bits&0x10==0x10:
-    GPIO.output(LCD_D4, True)
-  if bits&0x20==0x20:
-    GPIO.output(LCD_D5, True)
-  if bits&0x40==0x40:
-    GPIO.output(LCD_D6, True)
-  if bits&0x80==0x80:
-    GPIO.output(LCD_D7, True)
+        elif page == 3:
+            # Page 3
+            blank_display()
+            print("Residual frequency: ")
+            print(resFreq)
+            print("Skew: ")
+            print(skew)
+            lcd_string("Residual frequency: ", LCD_LINE_1, 1)
+            lcd_string(resFreq, LCD_LINE_2, 3)
+            lcd_string("Skew: ", LCD_LINE_3, 1)
+            lcd_string(skew, LCD_LINE_4, 3)
 
-  # Toggle 'Enable' pin
-  lcd_toggle_enable()
+        elif page == 4:
+            # Page 4
+            blank_display()
+            print("Root delay: ")
+            print(rootDly)
+            print("Root dispersion: ")
+            print(rootDisp)
+            lcd_string("Root delay: ", LCD_LINE_1, 1)
+            lcd_string(rootDly, LCD_LINE_2, 3)
+            lcd_string("Root dispersion: ", LCD_LINE_3, 1)
+            lcd_string(rootDisp, LCD_LINE_4, 3)
 
-  # Low bits
-  GPIO.output(LCD_D4, False)
-  GPIO.output(LCD_D5, False)
-  GPIO.output(LCD_D6, False)
-  GPIO.output(LCD_D7, False)
-  if bits&0x01==0x01:
-    GPIO.output(LCD_D4, True)
-  if bits&0x02==0x02:
-    GPIO.output(LCD_D5, True)
-  if bits&0x04==0x04:
-    GPIO.output(LCD_D6, True)
-  if bits&0x08==0x08:
-    GPIO.output(LCD_D7, True)
+        elif page == 5:
+            # Page 5
+            blank_display()
+            print("Update Interval:")
+            print(upInt)
+            print("Leap Status: ")
+            print(lpStat)
+            lcd_string("Update Interval:", LCD_LINE_1, 1)
+            lcd_string(upInt, LCD_LINE_2, 3)
+            lcd_string("Leap Year Status: ", LCD_LINE_3, 1)
+            lcd_string(lpStat, LCD_LINE_4, 3)
 
-  # Toggle 'Enable' pin
-  lcd_toggle_enable()
+        time.sleep(delay)
 
-def lcd_toggle_enable():
-  # Toggle enable
-  time.sleep(E_DELAY)
-  GPIO.output(LCD_E, True)
-  time.sleep(E_PULSE)
-  GPIO.output(LCD_E, False)
-  time.sleep(E_DELAY)
+    else:
+        print("chronyc error or no data")
+        blank_display()
+        lcd_string("********************", LCD_LINE_1, 2)
+        lcd_string("*  chronyc error   *", LCD_LINE_2, 2)
+        lcd_string("*                  *", LCD_LINE_3, 2)
+        lcd_string("********************", LCD_LINE_4, 2)
+        time.sleep(delay)
 
-def lcd_string(message,line,style):
-  # Send string to display
-  # style=1 Left justified
-  # style=2 Centred
-  # style=3 Right justified
 
-  if style==1:
-    message = message.ljust(LCD_WIDTH," ")
-  elif style==2:
-    message = message.center(LCD_WIDTH," ")
-  elif style==3:
-    message = message.rjust(LCD_WIDTH," ")
+def main():
+    global lcd_rs, lcd_e, lcd_d4, lcd_d5, lcd_d6, lcd_d7
 
-  lcd_byte(line, LCD_CMD)
+    # Initialize LCD pins using gpiozero (uses lgpio /dev/gpiomem, no root needed)
+    print("Initializing LCD GPIO...")
+    lcd_rs = DigitalOutputDevice(LCD_RS)
+    lcd_e = DigitalOutputDevice(LCD_E)
+    lcd_d4 = DigitalOutputDevice(LCD_D4)
+    lcd_d5 = DigitalOutputDevice(LCD_D5)
+    lcd_d6 = DigitalOutputDevice(LCD_D6)
+    lcd_d7 = DigitalOutputDevice(LCD_D7)
 
-  for i in range(LCD_WIDTH):
-    lcd_byte(ord(message[i]),LCD_CHR)
+    # Start Web Server in a separate thread
+    try:
+        web_thread = threading.Thread(target=run_web_server, daemon=True)
+        web_thread.start()
+        print("Web server started on port 8080")
+    except Exception as e:
+        print(f"Failed to start web server: {e}")
+
+    # Start background stats collector thread
+    try:
+        collector_thread = threading.Thread(target=stats_collector, daemon=True)
+        collector_thread.start()
+        print("Stats collector started")
+    except Exception as e:
+        print(f"Failed to start stats collector: {e}")
+
+    # Initialise display
+    lcd_init()
+
+    # Startup message
+    lcd_string("GPS Disciplined", LCD_LINE_1, 2)
+    lcd_string("NTP Time Server", LCD_LINE_2, 2)
+    lcd_string("v1.4-no-root", LCD_LINE_3, 2)
+    lcd_string("No root required", LCD_LINE_4, 2)
+    time.sleep(2)
+
+    # Time to display each stats page (seconds)
+    stats_delay = 3
+    # Time to display time page (seconds)
+    time_cycles = 10
+    # Number of GPS data pages
+    gpsPages = 2
+    # Number of chrony stats pages
+    chronyPages = 5
+    # Number of pages of network stats
+    netPages = 2
+
+    while True:
+        # Display time and network stats alternately
+        i = 1
+        while i <= netPages:
+            displayTime(time_cycles)
+            displayNetworkData(i, stats_delay)
+            if i == netPages:
+                break
+            i += 1
+
+        # Display time and memory stats
+        displayTime(time_cycles)
+        displayMemData(stats_delay)
+
+        # Display time and GPS data alternately
+        i = 1
+        while i <= gpsPages:
+            displayTime(time_cycles)
+            displayGPSData(i, stats_delay)
+            if i == gpsPages:
+                break
+            i += 1
+
+        # Display time and chrony stats alternately
+        i = 1
+        while i <= chronyPages:
+            displayTime(time_cycles)
+            displayChronyStats(i, stats_delay)
+            if i == chronyPages:
+                break
+            i += 1
 
 if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        blank_display()
+        lcd_string("********************", LCD_LINE_1, 2)
+        lcd_string("*  System Stopped  *", LCD_LINE_2, 2)
+        lcd_string("*     Goodbye!     *", LCD_LINE_3, 2)
+        lcd_string("********************", LCD_LINE_4, 2)
 
-  try:
-    main()
-  except KeyboardInterrupt:
-    pass
-  finally:
-    blank_display()
-    lcd_string("********************",LCD_LINE_1,2)
-    lcd_string("*  System Stopped  *",LCD_LINE_2,2)
-    lcd_string("*     Goodbye!     *",LCD_LINE_3,2)
-    lcd_string("********************",LCD_LINE_4,2)
-
-    GPIO.cleanup()
+        # Cleanup GPIO
+        try:
+            if lcd_rs: lcd_rs.close()
+            if lcd_e: lcd_e.close()
+            if lcd_d4: lcd_d4.close()
+            if lcd_d5: lcd_d5.close()
+            if lcd_d6: lcd_d6.close()
+            if lcd_d7: lcd_d7.close()
+        except:
+            pass

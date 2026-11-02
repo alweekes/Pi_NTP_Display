@@ -1,6 +1,6 @@
 # Pi NTP Display: Code Walkthrough
 
-How `Pi_NTP_Display.py` is put together, current as of v1.3.
+How `Pi_NTP_Display.py` is put together, current as of v1.4 (no-root version).
 
 ## Overview
 
@@ -11,20 +11,26 @@ The script does two jobs at once:
 
 Both read from the same shared data, so the LCD and the web page always show the same values.
 
+**Key v1.4 change:** All hardware/subprocess calls replaced with pure-Python libraries that work without root:
+- GPIO → `gpiozero` + `lgpio` (uses `/dev/gpiomem`, needs `gpio` group)
+- Memory/Network → `psutil` (pure Python)
+- GPS → `gpsd-py3` (connects to gpsd socket, needs `dialout` group for gpsd's serial access)
+- Chrony → `chronyc -n tracking` over Unix socket (no root needed)
+
 ## Data collection
 
-Stats are collected by a **background thread** (`stats_collector()`) running on independent intervals, so the LCD loop and web server never block on subprocess calls:
+Stats are collected by a **background thread** (`stats_collector()`) running on independent intervals, so the LCD loop and web server never block on I/O:
 
 | Function | Source | `shared_stats` key | Interval |
 |---|---|---|---|
-| `get_network_data()` | `ip add show dev eth0`, `ip -s link show eth0` | `network` | 10 s |
-| `get_mem_data()` | `free` | `memory` | 10 s |
-| `get_gps_data()` | `gpspipe -r -x 3` (GPGGA and GPGSA, parsed with `pynmea2`) | `gps` | 5 s |
-| `get_chrony_data()` | `chronyc tracking` | `chrony` | 2 s |
+| `get_network_data()` | `psutil.net_if_addrs()`, `psutil.net_if_stats()`, `psutil.net_io_counters()` | `network` | 10 s |
+| `get_mem_data()` | `psutil.virtual_memory()` | `memory` | 10 s |
+| `get_gps_data()` | `gpsd-py3` client → gpsd socket (TPV + SKY reports) | `gps` | 5 s |
+| `get_chrony_data()` | `chronyc -n tracking` (subprocess, but no root) | `chrony` | 2 s |
 
-The background thread updates `shared_stats` (a plain dict) and `shared_stats["last_updated"]` on each cycle. All subprocess calls use argument lists (no `shell=True`) to avoid the shell-spawn overhead on the Pi 1 Model B.
+The background thread updates `shared_stats` (a plain dict) and `shared_stats["last_updated"]` on each cycle. No `shell=True` anywhere.
 
-The LCD display functions (`displayMemData`, `displayNetworkData`, `displayGPSData`, `displayChronyStats`) now **read from `shared_stats`** instead of calling the `get_*` functions directly, so they return instantly.
+The LCD display functions (`displayMemData`, `displayNetworkData`, `displayGPSData`, `displayChronyStats`) read from `shared_stats` instead of calling the `get_*` functions directly, so they return instantly.
 
 `displayTime()` also writes `shared_stats["last_updated"]` every second while the clock page is showing.
 
@@ -61,9 +67,36 @@ Per-request access logging is switched off (`log_message` is overridden) because
 
 **Offset chart:** `drawChart()` renders `offset_history` as an inline SVG polyline, scaled symmetrically around a dashed zero line to the largest absolute offset in the window.
 
-**Units:** `fmtSec()` auto-scales seconds to ns / µs / ms / s; `fmtBytes()` formats memory (reported by `free` in KiB) and network counters.
+**Units:** `fmtSec()` auto-scales seconds to ns / µs / ms / s; `fmtBytes()` formats memory (reported by `psutil` in bytes) and network counters.
 
 **Tooltips:** chrony labels carry a `data-tip` attribute and `tabindex="0"`. CSS shows the text in a `::after` popover on `:hover` or `:focus`, so they work with a mouse, a keyboard, or a tap on a touch screen. Labels on the right-hand side use `.tip-right` so their popover opens leftwards.
+
+## LCD Driver (gpiozero)
+
+The LCD is driven in 4-bit mode using six `DigitalOutputDevice` pins from `gpiozero`:
+- RS (Register Select) → GPIO 7
+- E (Enable) → GPIO 8
+- D4-D7 (Data bits 4-7) → GPIO 25, 24, 23, 22
+
+`gpiozero` uses `lgpio` under the hood, which accesses `/dev/gpiomem` — no root required, just the `gpio` group.
+
+Functions:
+- `lcd_init()` — HD44780 initialization sequence
+- `lcd_byte(bits, mode)` — sends 8-bit command/data in two 4-bit nibbles
+- `lcd_string(message, line, style)` — writes a padded/centered/right-aligned string to a line
+- `blank_display()` — clears the screen
+
+## GPS Data (gpsd-py3)
+
+Replaces `gpspipe` subprocess with `gpsdclient.GPSDClient`:
+- Connects to gpsd on `localhost:2947` (default)
+- Streams JSON reports: `TPV` (position/velocity/time) and `SKY` (satellites/DOP)
+- Parses `mode` (1=No fix, 2=2D, 3=3D), `nSat`, `pdop`/`hdop`/`vdop`, `lat`/`lon`/`alt`
+- Converts NMEA DDMM.MMMM to decimal degrees for the web page
+
+## Chrony Data
+
+Uses `chronyc -n tracking` (the `-n` flag avoids DNS lookups). Output is parsed by splitting whitespace — same indices as before. The `chronyc` client connects to chronyd's Unix socket (`/var/run/chrony/chronyd.sock`), which is readable by all users.
 
 ## Testing without a Pi
 
@@ -71,9 +104,11 @@ The web side can be exercised on any machine by stubbing the hardware modules an
 
 ```python
 import sys, types
+sys.modules["gpiozero"] = types.ModuleType("gpiozero")
+sys.modules["lgpio"] = types.ModuleType("lgpio")
+sys.modules["psutil"] = types.ModuleType("psutil")
+sys.modules["gpsdclient"] = types.ModuleType("gpsdclient")
 sys.modules["pynmea2"] = types.ModuleType("pynmea2")
-sys.modules["RPi"] = types.ModuleType("RPi")
-sys.modules["RPi.GPIO"] = types.ModuleType("RPi.GPIO")
 
 import Pi_NTP_Display as p
 p.shared_stats["chrony"] = {"last_offset": "+0.000000213 s", "rms_offset": "0.000000641 s", "leap_status": "Normal"}

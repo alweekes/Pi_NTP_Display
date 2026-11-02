@@ -10,9 +10,11 @@ This is a rebuild of my GPS disciplined Raspberry Pi NTP server, using DietPi as
 
 The Pi uses a USB GPS dongle, modified to extract the PPS signal (fed into the Pi on GPIO18) and ultimately fed to gpsd/chrony for high accuracy.
 
-To make it more useful I added a 20x4 LCD display to use it as a clock and show some stats on rotation. The display shows the time + date between each stats page, cycling through two pages of network stats, memory usage, two pages of GPS stats from `gpspipe`, and five pages of chrony stats from `chronyc`. The same stats are also served as a web page.
+To make it more useful I added a 20x4 LCD display to use it as a clock and show some stats on rotation. The display shows the time + date between each stats page, cycling through two pages of network stats, memory usage, two pages of GPS stats from `gpsd`, and five pages of chrony stats from `chronyc`. The same stats are also served as a web page.
 
 LCD code is based on a simplified version of [Matt Hawkins' 20x4 LCD code](https://www.raspberrypi-spy.co.uk/2012/08/20x4-lcd-module-control-using-python/); I've just removed the backlight toggling.
+
+**Version 1.4+ runs without root privileges** — uses `gpiozero` + `lgpio` (via `/dev/gpiomem`) for GPIO, `psutil` for system stats, and `gpsd-py3` for GPS data over the gpsd socket.
 
 ## Hardware
 
@@ -24,23 +26,73 @@ The full LCD pin-to-GPIO wiring table is in the header comment of [Pi_NTP_Displa
 
 ## Requirements
 
-- `gpsd` and `gpsd-clients` (provides `gpspipe`), configured for your GPS receiver
-- `chrony`, configured to use gpsd/PPS as its reference
-- Python 3 with `RPi.GPIO` and `pynmea2`:
+### System packages (install once)
+```bash
+sudo apt-get update && sudo apt-get install -y gpsd gpsd-clients chrony python3-pip
+```
 
-  ```bash
-  pip3 install RPi.GPIO pynmea2
-  ```
+Configure `gpsd` for your GPS receiver (e.g., `/dev/ttyAMA0` or `/dev/ttyUSB0`) and `chrony` to use gpsd/PPS as its reference.
 
-The web server uses only the Python standard library.
+### Python packages (no root required)
+```bash
+pip3 install -r requirements.txt
+```
+
+Or manually:
+```bash
+pip3 install gpiozero lgpio psutil gpsd-py3 pynmea2
+```
+
+### User permissions (no sudo needed)
+Add your user to the required groups:
+```bash
+sudo usermod -a -G gpio,dialout $USER
+# Log out and back in for groups to take effect
+```
+- `gpio` group: access to `/dev/gpiomem` for LCD control
+- `dialout` group: access to GPS serial device (used by gpsd, not directly by this script)
 
 ## Running
 
+**No sudo required!**
 ```bash
-sudo python3 Pi_NTP_Display.py
+python3 Pi_NTP_Display.py
 ```
 
 The LCD starts cycling through its pages and the web page is available at `http://<pi-ip>:8080/`.
+
+### Run as a systemd service (recommended for production)
+
+Create `/etc/systemd/system/pi-ntp-display.service`:
+```ini
+[Unit]
+Description=Pi NTP Display
+After=network.target gpsd.service chrony.service
+Requires=gpsd.service chrony.service
+
+[Service]
+Type=simple
+User=pi
+Group=gpio
+SupplementaryGroups=dialout
+ExecStart=/usr/bin/python3 /home/pi/Pi_NTP_Display/Pi_NTP_Display.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/Pi_NTP_Display
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-ntp-display
+```
 
 ## Web status page
 
