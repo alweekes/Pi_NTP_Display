@@ -17,6 +17,8 @@ Both read from the same shared data, so the LCD and the web page always show the
 - GPS → `gpsd-py3` (connects to gpsd socket, needs `dialout` group for gpsd's serial access)
 - Chrony → `chronyc -n tracking` over Unix socket (no root needed)
 
+**On DietPi/Raspberry Pi OS:** `gpiozero`, `lgpio`, `psutil`, `pynmea2`, and `gpsd` Python bindings are available as system packages (`python3-gpiozero`, `python3-lgpio`, `python3-psutil`, `python3-pynmea2`, `python3-gpsd`). Only `gpsd-py3` needs pip.
+
 ## Data collection
 
 Stats are collected by a **background thread** (`stats_collector()`) running on independent intervals, so the LCD loop and web server never block on I/O:
