@@ -761,7 +761,7 @@ def get_chrony_data():
 
         import re
 
-        def extract(key, pattern=r':\s*(.+)$'):
+        def extract(key, pattern=r'\s*:\s*(.+)$'):
             m = re.search(rf'^{re.escape(key)}{pattern}', output, re.MULTILINE)
             result = m.group(1).strip() if m else None
             print(f"DEBUG extract '{key}': {result}")
