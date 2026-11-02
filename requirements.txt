@@ -1,7 +1,9 @@
 # Pi NTP Display - No-root version requirements
 # Most dependencies available as Debian packages on DietPi/Raspberry Pi OS:
-#   sudo apt install python3-gpiozero python3-lgpio python3-psutil python3-pynmea2 python3-gpsd
-# Only gpsd-py3 needs pip:
-#   pip3 install gpsd-py3
+#   sudo apt install python3-gpiozero python3-lgpio python3-psutil
+# These need pip:
+#   pip3 install gpsd-py3 pynmea2 gpsd
 
 gpsd-py3>=1.0.0
+pynmea2>=1.18.0
+gpsd>=3.0.0

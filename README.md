@@ -28,22 +28,23 @@ The full LCD pin-to-GPIO wiring table is in the header comment of [Pi_NTP_Displa
 
 ### System packages (install once)
 ```bash
-sudo apt-get update && sudo apt-get install -y gpsd gpsd-clients chrony python3-pip python3-gpiozero python3-lgpio python3-psutil python3-pynmea2 python3-gpsd
+sudo apt-get update && sudo apt-get install -y gpsd gpsd-clients chrony python3-gpiozero python3-lgpio python3-psutil python3-pip
 ```
 
 Configure `gpsd` for your GPS receiver (e.g., `/dev/ttyAMA0` or `/dev/ttyUSB0`) and `chrony` to use gpsd/PPS as its reference.
 
-### Python packages (only `gpsd-py3` needs pip)
-```bash
-pip3 install gpsd-py3
-```
-
-Or if using a virtual environment (recommended to avoid externally-managed-environment error):
+### Python packages (install in venv to avoid externally-managed-environment error)
 ```bash
 cd ~/Pi_NTP_Display
 python3 -m venv venv
 source venv/bin/activate
-pip install gpsd-py3
+pip install -r requirements.txt
+```
+This installs: `gpsd-py3`, `pynmea2`, `gpsd` (the rest are system packages).
+
+Or if you prefer `--break-system-packages`:
+```bash
+pip3 install --break-system-packages -r requirements.txt
 ```
 
 ### User permissions (no sudo needed)
