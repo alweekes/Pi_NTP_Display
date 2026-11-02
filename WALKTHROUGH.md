@@ -14,10 +14,10 @@ Both read from the same shared data, so the LCD and the web page always show the
 **Key v1.4 change:** All hardware/subprocess calls replaced with pure-Python libraries that work without root:
 - GPIO → `gpiozero` + `lgpio` (uses `/dev/gpiomem`, needs `gpio` group)
 - Memory/Network → `psutil` (pure Python)
-- GPS → `gpsd-py3` (connects to gpsd socket, needs `dialout` group for gpsd's serial access)
+- GPS → `gpsdclient` (connects to gpsd socket, needs `dialout` group for gpsd's serial access)
 - Chrony → `chronyc -n tracking` over Unix socket (no root needed)
 
-**On DietPi/Raspberry Pi OS:** `gpiozero`, `lgpio`, `psutil` are available as system packages (`python3-gpiozero`, `python3-lgpio`, `python3-psutil`). The remaining dependencies (`gpsd-py3`, `pynmea2`, `gpsd`) need pip — use a virtual environment to avoid externally-managed-environment errors.
+**On DietPi/Raspberry Pi OS:** `gpiozero`, `lgpio`, `psutil` are available as system packages (`python3-gpiozero`, `python3-lgpio`, `python3-psutil`). The remaining dependencies (`gpsdclient`, `pynmea2`) need pip — use a virtual environment to avoid externally-managed-environment errors.
 
 ## Data collection
 

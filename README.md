@@ -40,7 +40,7 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-This installs: `gpsd-py3`, `pynmea2`, `gpsd` (the rest are system packages).
+This installs: `gpsdclient`, `pynmea2` (the rest are system packages).
 
 Or if you prefer `--break-system-packages`:
 ```bash
