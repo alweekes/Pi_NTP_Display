@@ -72,17 +72,17 @@ Requires=gpsd.service chrony.service
 
 [Service]
 Type=simple
-User=pi
+User=dietpi
 Group=gpio
 SupplementaryGroups=dialout
-ExecStart=/usr/bin/python3 /home/pi/Pi_NTP_Display/Pi_NTP_Display.py
+ExecStart=/usr/bin/python3 /home/dietpi/Pi_NTP_Display/Pi_NTP_Display.py
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/pi/Pi_NTP_Display
+ReadWritePaths=/home/dietpi/Pi_NTP_Display
 
 [Install]
 WantedBy=multi-user.target
