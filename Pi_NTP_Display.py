@@ -675,13 +675,19 @@ def get_gps_data():
         # Get TPV (position) and SKY (satellites/DOP) reports
         tpv_report = None
         sky_report = None
+        start_time = time.time()
+        max_wait = 10  # seconds to wait for both reports
 
         for report in client.dict_stream():
-            if report.get('class') == 'TPV' and hasattr(report, 'lat') and report.lat is not None:
+            # dict_stream returns dicts, check keys not attributes
+            if report.get('class') == 'TPV' and report.get('lat') is not None:
                 tpv_report = report
             elif report.get('class') == 'SKY':
                 sky_report = report
             if tpv_report and sky_report:
+                break
+            # Timeout safety
+            if time.time() - start_time > max_wait:
                 break
 
         if not tpv_report:
@@ -689,13 +695,13 @@ def get_gps_data():
 
         # Extract GPS data
         sat_val = str(sky_report.get('nSat', 0)) if sky_report else "0"
-        lat_val = format_gps_coord(tpv_report.lat, 'N' if tpv_report.lat >= 0 else 'S', True)
-        lon_val = format_gps_coord(tpv_report.lon, 'E' if tpv_report.lon >= 0 else 'W', False)
-        lat_web = format_gps_coord(tpv_report.lat, 'N' if tpv_report.lat >= 0 else 'S', True, degree_symbol="°")
-        lon_web = format_gps_coord(tpv_report.lon, 'E' if tpv_report.lon >= 0 else 'W', False, degree_symbol="°")
-        lat_decimal = tpv_report.lat
-        lon_decimal = tpv_report.lon
-        alt_val = f"{tpv_report.alt:.1f}m" if tpv_report.alt is not None else "N/A"
+        lat_val = format_gps_coord(tpv_report['lat'], 'N' if tpv_report['lat'] >= 0 else 'S', True)
+        lon_val = format_gps_coord(tpv_report['lon'], 'E' if tpv_report['lon'] >= 0 else 'W', False)
+        lat_web = format_gps_coord(tpv_report['lat'], 'N' if tpv_report['lat'] >= 0 else 'S', True, degree_symbol="°")
+        lon_web = format_gps_coord(tpv_report['lon'], 'E' if tpv_report['lon'] >= 0 else 'W', False, degree_symbol="°")
+        lat_decimal = tpv_report['lat']
+        lon_decimal = tpv_report['lon']
+        alt_val = f"{tpv_report['alt']:.1f}m" if tpv_report.get('alt') is not None else "N/A"
 
         # Fix mode: 1=No fix, 2=2D, 3=3D
         fix_mode = sky_report.get('mode', 1) if sky_report else 1
