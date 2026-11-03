@@ -350,7 +350,7 @@ WEB_PAGE = r"""<!DOCTYPE html>
     var leap = { Not: "Not synchronised", Insert: "Insert second", Delete: "Delete second" }[c.leap_status] || c.leap_status;
     set("c-leap", leap);
 
-    set("g-sats", g.satellites ? parseInt(g.satellites, 10) : "--");
+    set("g-sats", g.satellites || "--");
     var fix = g.fix || "NO DATA";
     $("g-fix").textContent = fix.toUpperCase();
     $("g-fix").className = "badge " + (fix === "3D Fix" ? "ok" : fix === "2D Fix" ? "warn" : "bad");
