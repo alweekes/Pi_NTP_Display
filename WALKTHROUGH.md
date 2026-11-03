@@ -1,6 +1,6 @@
 # Pi NTP Display: Code Walkthrough
 
-How `Pi_NTP_Display.py` is put together, current as of v1.4 (no-root version).
+How `Pi_NTP_Display.py` is put together, current as of v1.5 (no-root version).
 
 ## Overview
 
@@ -11,7 +11,7 @@ The script does two jobs at once:
 
 Both read from the same shared data, so the LCD and the web page always show the same values.
 
-**Key v1.4 change:** All hardware/subprocess calls replaced with pure-Python libraries that work without root:
+**Key v1.5 change:** All hardware/subprocess calls replaced with pure-Python libraries that work without root:
 - GPIO → `gpiozero` + `lgpio` (uses `/dev/gpiomem`, needs `gpio` group)
 - Memory/Network → `psutil` (pure Python)
 - GPS → `gpsdclient` (connects to gpsd socket, needs `dialout` group for gpsd's serial access)
@@ -27,7 +27,7 @@ Stats are collected by a **background thread** (`stats_collector()`) running on 
 |---|---|---|---|
 | `get_network_data()` | `psutil.net_if_addrs()`, `psutil.net_if_stats()`, `psutil.net_io_counters()` | `network` | 10 s |
 | `get_mem_data()` | `psutil.virtual_memory()` | `memory` | 10 s |
-| `get_gps_data()` | `gpsd-py3` client → gpsd socket (TPV + SKY reports) | `gps` | 5 s |
+| `get_gps_data()` | `gpsdclient` client → gpsd socket (TPV + SKY reports) | `gps` | 5 s |
 | `get_chrony_data()` | `chronyc -n tracking` (subprocess, but no root) | `chrony` | 2 s |
 
 The background thread updates `shared_stats` (a plain dict) and `shared_stats["last_updated"]` on each cycle. No `shell=True` anywhere.
@@ -88,17 +88,20 @@ Functions:
 - `lcd_string(message, line, style)` — writes a padded/centered/right-aligned string to a line
 - `blank_display()` — clears the screen
 
-## GPS Data (gpsd-py3)
+## GPS Data (gpsdclient)
 
 Replaces `gpspipe` subprocess with `gpsdclient.GPSDClient`:
 - Connects to gpsd on `localhost:2947` (default)
 - Streams JSON reports: `TPV` (position/velocity/time) and `SKY` (satellites/DOP)
-- Parses `mode` (1=No fix, 2=2D, 3=3D), `nSat`, `pdop`/`hdop`/`vdop`, `lat`/`lon`/`alt`
+- **Fix mode** from TPV report (1=No fix, 2=2D, 3=3D)
+- **Satellites**: waits for SKY report with `satellites` list, counts `used=true` for fix, shows "used/total" (e.g., "6/18")
+- Falls back to `nSat` if satellite list unavailable
+- DOP values (`pdop`/`hdop`/`vdop`) from SKY report
 - Converts NMEA DDMM.MMMM to decimal degrees for the web page
 
 ## Chrony Data
 
-Uses `chronyc -n tracking` (the `-n` flag avoids DNS lookups). Output is parsed by splitting whitespace — same indices as before. The `chronyc` client connects to chronyd's Unix socket (`/var/run/chrony/chronyd.sock`), which is readable by all users.
+Uses `chronyc -n tracking` (the `-n` flag avoids DNS lookups). **v1.5: robust regex parsing** by field labels (Reference ID, System time, Last offset, etc.) instead of hardcoded indices — handles variable spacing in output. The `chronyc` client connects to chronyd's Unix socket (`/var/run/chrony/chronyd.sock`), which is readable by all users.
 
 ## Testing without a Pi
 

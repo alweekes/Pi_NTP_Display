@@ -14,7 +14,7 @@ To make it more useful I added a 20x4 LCD display to use it as a clock and show 
 
 LCD code is based on a simplified version of [Matt Hawkins' 20x4 LCD code](https://www.raspberrypi-spy.co.uk/2012/08/20x4-lcd-module-control-using-python/); I've just removed the backlight toggling.
 
-**Version 1.4+ runs without root privileges** — uses `gpiozero` + `lgpio` (via `/dev/gpiomem`) for GPIO, `psutil` for system stats, and `gpsd-py3` for GPS data over the gpsd socket.
+**Version 1.5+ runs without root privileges** — uses `gpiozero` + `lgpio` (via `/dev/gpiomem`) for GPIO, `psutil` for system stats, and `gpsdclient` for GPS data over the gpsd socket.
 
 ## Hardware
 
@@ -123,18 +123,25 @@ The page polls every 2 seconds and updates in place without reloading. Stats are
   "last_updated": "2026-09-26 14:02:11",
   "memory":  { "total": "...", "used": "...", "free": "..." },
   "network": { "ip": "...", "state": "...", "mac": "...", "rx": "...", "tx": "...", ... },
-  "gps":     { "fix": "3D Fix", "satellites": "09", "latitude": "...", "longitude": "...", "latitude_decimal": 51.5074, "longitude_decimal": -0.1278, ... },
+  "gps":     { "fix": "3D Fix", "satellites": "6/18", "latitude": "...", "longitude": "...", "latitude_decimal": 51.5074, "longitude_decimal": -0.1278, ... },
   "chrony":  { "last_offset": "+0.000000213 s", "rms_offset": "...", "leap_status": "Normal", ... },
   "offset_history": [[1790000000000, 2.13e-07], ...],
   "server_time_ms": 1790000000123
 }
 ```
 
-Values are passed through as reported by the underlying tools (memory in KiB, network counters in bytes). `offset_history` entries are `[epoch milliseconds, offset in seconds]`. GPS includes both DMS (`latitude`/`longitude`) and decimal degrees (`latitude_decimal`/`longitude_decimal`) for easy copy/paste into mapping tools.
+Values are passed through as reported by the underlying tools (memory in KiB, network counters in bytes). `offset_history` entries are `[epoch milliseconds, offset in seconds]`. GPS includes both DMS (`latitude`/`longitude`) and decimal degrees (`latitude_decimal`/`longitude_decimal`) for easy copy/paste into mapping tools. GPS satellites shown as "used/total" (e.g., "6/18").
 
 See [WALKTHROUGH.md](WALKTHROUGH.md) for how the code is structured.
 
 ## Changelog
+
+**v1.5**
+- **No-root**: Replaced `RPi.GPIO` with `gpiozero` + `lgpio` (uses `/dev/gpiomem`), `subprocess` calls with `psutil`, `gpspipe` with `gpsdclient`.
+- **GPS**: Shows satellites as "used/total" (e.g., "6/18"); fix mode from TPV report; waits for complete SKY report with satellite data.
+- **Chrony**: Robust regex parsing (handles variable spacing in `chronyc tracking` output).
+- **Dependencies**: System packages for `gpiozero`, `lgpio`, `psutil`; pip packages `gpsdclient`, `pynmea2` in venv.
+- **DietPi**: Systemd service configured for `dietpi` user.
 
 **v1.4**
 - **Performance**: Background stats collector thread (no more blocking subprocess calls in main loop); removed `shell=True` from all subprocess calls; web server uses `ThreadingTCPServer` for concurrent requests; static HTML served with ETag/conditional requests (304 Not Modified).
