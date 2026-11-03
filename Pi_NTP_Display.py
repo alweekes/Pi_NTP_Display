@@ -697,10 +697,11 @@ def get_gps_data():
             raise ValueError("No TPV report from gpsd")
 
         # Extract GPS data
-        # Satellite count: only count satellites used for fix
+        # Satellite count: show used/total
         if sky_report and sky_report.get('satellites'):
             used_sats = [s for s in sky_report['satellites'] if s.get('used')]
-            sat_val = str(len(used_sats))
+            total_sats = len(sky_report['satellites'])
+            sat_val = f"{len(used_sats)}/{total_sats}"
         elif sky_report:
             # Fallback to nSat if no satellite list
             sat_val = str(sky_report.get('nSat', 0))
