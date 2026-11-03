@@ -687,6 +687,8 @@ def get_gps_data():
                 print(f"DEBUG GPS: got TPV lat={report.get('lat')}")
             elif rclass == 'SKY':
                 sky_report = report
+                print(f"DEBUG GPS: got SKY report keys: {list(report.keys())}")
+                print(f"DEBUG GPS: got SKY full: {report}")
                 print(f"DEBUG GPS: got SKY mode={report.get('mode')}, nSat={report.get('nSat')}")
             if tpv_report and sky_report:
                 break
