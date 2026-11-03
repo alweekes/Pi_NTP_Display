@@ -694,6 +694,7 @@ def get_gps_data():
             raise ValueError("No TPV report from gpsd")
 
         # Extract GPS data
+        print(f"DEBUG GPS: tpv={tpv_report is not None}, sky={sky_report is not None}, mode={sky_report.get('mode') if sky_report else None}, nSat={sky_report.get('nSat') if sky_report else None}")
         sat_val = str(sky_report.get('nSat', 0)) if sky_report else "0"
         lat_val = format_gps_coord(tpv_report['lat'], 'N' if tpv_report['lat'] >= 0 else 'S', True)
         lon_val = format_gps_coord(tpv_report['lon'], 'E' if tpv_report['lon'] >= 0 else 'W', False)
@@ -710,7 +711,8 @@ def get_gps_data():
         vdop_val = f"{sky_report.get('vdop', 0):.1f}" if sky_report else "0"
 
         readable_fix = ("No fix", "2D Fix", "3D Fix")
-        fix_text = readable_fix[fix_mode] if fix_mode < 3 else "3D Fix"
+        # fix_mode is 1-based, tuple is 0-based
+        fix_text = readable_fix[fix_mode - 1] if 1 <= fix_mode <= 3 else "No fix"
 
         shared_stats["gps"] = {
             "satellites": sat_val,
