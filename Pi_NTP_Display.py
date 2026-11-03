@@ -680,10 +680,14 @@ def get_gps_data():
 
         for report in client.dict_stream():
             # dict_stream returns dicts, check keys not attributes
-            if report.get('class') == 'TPV' and report.get('lat') is not None:
+            rclass = report.get('class')
+            print(f"DEBUG GPS stream: class={rclass}")
+            if rclass == 'TPV' and report.get('lat') is not None:
                 tpv_report = report
-            elif report.get('class') == 'SKY':
+                print(f"DEBUG GPS: got TPV lat={report.get('lat')}")
+            elif rclass == 'SKY':
                 sky_report = report
+                print(f"DEBUG GPS: got SKY mode={report.get('mode')}, nSat={report.get('nSat')}")
             if tpv_report and sky_report:
                 break
             # Timeout safety
