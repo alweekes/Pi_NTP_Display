@@ -681,15 +681,12 @@ def get_gps_data():
         for report in client.dict_stream():
             # dict_stream returns dicts, check keys not attributes
             rclass = report.get('class')
-            print(f"DEBUG GPS stream: class={rclass}")
             if rclass == 'TPV' and report.get('lat') is not None:
                 tpv_report = report
-                print(f"DEBUG GPS: got TPV lat={report.get('lat')}")
             elif rclass == 'SKY':
-                sky_report = report
-                print(f"DEBUG GPS: got SKY report keys: {list(report.keys())}")
-                print(f"DEBUG GPS: got SKY full: {report}")
-                print(f"DEBUG GPS: got SKY mode={report.get('mode')}, nSat={report.get('nSat')}")
+                # Only use SKY report if it has satellite data
+                if report.get('nSat') is not None or report.get('satellites') is not None:
+                    sky_report = report
             if tpv_report and sky_report:
                 break
             # Timeout safety
@@ -700,8 +697,16 @@ def get_gps_data():
             raise ValueError("No TPV report from gpsd")
 
         # Extract GPS data
-        print(f"DEBUG GPS: tpv={tpv_report is not None}, sky={sky_report is not None}, mode={sky_report.get('mode') if sky_report else None}, nSat={sky_report.get('nSat') if sky_report else None}")
-        sat_val = str(sky_report.get('nSat', 0)) if sky_report else "0"
+        # Satellite count: prefer nSat, fallback to len(satellites)
+        if sky_report:
+            sat_val = str(sky_report.get('nSat', 0))
+            if sat_val == "0" and sky_report.get('satellites'):
+                sat_val = str(len(sky_report['satellites']))
+        else:
+            sat_val = "0"
+        
+        # Fix mode: from TPV report (mode 1=No fix, 2=2D, 3=3D)
+        fix_mode = tpv_report.get('mode', 1) if tpv_report else 1
         lat_val = format_gps_coord(tpv_report['lat'], 'N' if tpv_report['lat'] >= 0 else 'S', True)
         lon_val = format_gps_coord(tpv_report['lon'], 'E' if tpv_report['lon'] >= 0 else 'W', False)
         lat_web = format_gps_coord(tpv_report['lat'], 'N' if tpv_report['lat'] >= 0 else 'S', True, degree_symbol="°")
@@ -710,8 +715,7 @@ def get_gps_data():
         lon_decimal = tpv_report['lon']
         alt_val = f"{tpv_report['alt']:.1f}m" if tpv_report.get('alt') is not None else "N/A"
 
-        # Fix mode: 1=No fix, 2=2D, 3=3D
-        fix_mode = sky_report.get('mode', 1) if sky_report else 1
+        # DOP values from SKY report
         pdop_val = f"{sky_report.get('pdop', 0):.1f}" if sky_report else "0"
         hdop_val = f"{sky_report.get('hdop', 0):.1f}" if sky_report else "0"
         vdop_val = f"{sky_report.get('vdop', 0):.1f}" if sky_report else "0"
